@@ -1,1 +1,103 @@
 # digital-applications-prototype
+
+A small Python 3.12+ project using `uv` and a `src/` package layout.
+The reusable LLM infrastructure is separate from domain feature code.
+[Stage 1 extraction](docs/stage1.md) converts input PDFs into atomic, source-grounded
+implementation observations; it does not generate lessons or process holdouts.
+
+```sh
+uv sync
+uv run python -m unittest discover -s tests -v
+```
+
+Tests use local fakes/mocks; they need no credentials and make no model calls.
+
+## Architecture and file responsibilities
+
+```text
+src/digital_applications_prototype/
+├── __init__.py                 # Existing CLI entry point
+├── core/
+│   ├── __init__.py             # Configuration package
+│   └── config.py               # Explicit environment loading and secret masking
+└── llm/
+    ├── __init__.py             # Infrastructure package
+    ├── prompt_renderer.py      # Jinja Environment, FileSystemLoader, StrictUndefined
+    ├── service.py              # Thin provider-independent generation boundary
+    ├── adapters/
+    │   ├── __init__.py         # Adapter package
+    │   ├── base.py             # Generic typed LLMAdapter protocol
+    │   └── openai.py           # Async SDK invocation and provider response handling
+    ├── prompts/
+    │   └── smoke.jinja2        # File-based architecture validation prompt
+    └── schemas/
+        ├── __init__.py         # Shared schema package
+        └── smoke.py            # Trivial SmokeTestResponse Pydantic model
+scripts/llm_smoke.py             # Explicit, opt-in live composition example
+tests/test_llm.py               # Offline renderer, service, adapter, config checks
+.env.example                    # Credential-free configuration template
+```
+
+Feature service → prompt renderer → LLM service → adapter → provider → typed result.
+Orchestration will compose feature services later; it does not belong in the renderer
+or adapter. Feature-specific prompts and schemas can live alongside those features.
+`PromptRenderer(custom_directory)` supports other template directories.
+
+The OpenAI adapter uses `AsyncOpenAI.responses.parse(text_format=Schema)` and
+returns `output_parsed`. This lets the SDK derive JSON Schema and validate the
+response, without custom JSON parsing. See the official
+[Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+SDK exceptions propagate unchanged; refusals, incomplete responses, and missing
+parsed output raise `StructuredOutputError`. The SDK's built-in retry behavior
+is retained; no additional retry or logging framework is introduced. Prompts and
+credentials are not logged. Only the concrete adapter and application composition
+code import the provider SDK.
+
+## Future feature service example
+
+This illustrative service uses the smoke schema; replace it with a feature-owned
+schema and prompt when implementing a real feature:
+
+```python
+from digital_applications_prototype.llm.prompt_renderer import PromptRenderer
+from digital_applications_prototype.llm.schemas.smoke import SmokeTestResponse
+from digital_applications_prototype.llm.service import LLMService
+
+class SummaryService:
+    def __init__(self, renderer: PromptRenderer, llm: LLMService):
+        self.renderer = renderer
+        self.llm = llm
+
+    async def summarize(self, text: str) -> SmokeTestResponse:
+        prompt = self.renderer.render("smoke.jinja2", text=text)
+        return await self.llm.generate_structured(
+            prompt=prompt, response_model=SmokeTestResponse
+        )
+```
+
+Inject `LLMService(fake_adapter)` in tests. The feature never imports OpenAI.
+The application boundary constructs the concrete adapter and owns the async SDK
+client lifecycle; `scripts/llm_smoke.py` shows that wiring with `async with`.
+
+## Optional live smoke call
+
+Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` and `LLM_MODEL`.
+There was no existing dotenv loader, so settings read the process environment;
+`uv --env-file` supplies optional `.env` loading without another dependency.
+Both values are required when loading settings. Choose an account-accessible
+model that supports structured outputs. `.env` is ignored by Git.
+
+The following command makes a paid API call. It is never run by the test suite:
+
+```sh
+uv run --env-file .env python scripts/llm_smoke.py
+```
+
+## Stage 1 pilot
+
+```sh
+uv run extract-observations --document KM_ISR07_2023 --dry-run
+```
+
+See [Stage 1 documentation](docs/stage1.md) for the file tree, execution flow,
+validation rules, reruns, and the opt-in one-document model command.

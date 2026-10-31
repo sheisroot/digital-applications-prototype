@@ -7,10 +7,16 @@ authors = [
     { name = "Faye Fong", email = "sheisroot@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "jinja2>=3.1,<4",
+    "openai>=2,<3",
+    "pydantic>=2,<3",
+    "pypdf>=6,<7",
+]
 
 [project.scripts]
 digital-applications-prototype = "digital_applications_prototype:main"
+extract-observations = "digital_applications_prototype.extraction.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

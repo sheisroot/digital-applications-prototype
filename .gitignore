@@ -1,3 +1,13 @@
+# Data folder to ignore
+data/
+
+# Local environment variants; keep the example template
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
