@@ -14,6 +14,11 @@ class PDFTextError(ValueError):
 
 
 def extract_pages(root: Path, document: DocumentEntry) -> list[PageText]:
+    """Extract input-only PDF text while preserving physical page numbers.
+
+    Warn about empty pages and raise PDFTextError if the entire document has
+    no extractable text, leaving OCR decisions to the caller.
+    """
     path = input_path(root, document.path)
     with path.open("rb") as source:
         reader = PdfReader(source)

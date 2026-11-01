@@ -5,6 +5,11 @@ from .models import DocumentChunk, DocumentEntry, DocumentMetadata, PageText
 
 def chunk_pages(document: DocumentEntry, pages: list[PageText], *,
                 max_chars: int = 12000) -> list[DocumentChunk]:
+    """Group consecutive pages under a soft character target without splitting pages.
+
+    Oversized pages form their own chunks; chunks containing only whitespace
+    are omitted. Page numbering must be consecutive and start at one.
+    """
     if max_chars < 1:
         raise ValueError("max_chars must be positive")
     if [page.page_number for page in pages] != list(range(1, len(pages) + 1)):

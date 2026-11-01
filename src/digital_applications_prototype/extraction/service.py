@@ -8,6 +8,7 @@ from .validation import GroundingError, validate_observation
 
 
 def render_prompt(renderer: PromptRenderer, chunk: DocumentChunk) -> str:
+    """Render chunk metadata and page-marked source text into the extraction prompt."""
     return renderer.render(
         "implementation_observations.jinja2",
         project_id=chunk.project_id, country=chunk.country, document_id=chunk.document_id,
@@ -24,6 +25,11 @@ class ImplementationObservationExtractor:
         self.llm = llm
 
     async def extract(self, chunk: DocumentChunk) -> list[ImplementationObservation]:
+        """Generate semantic claims through LLMService and validate their grounding.
+
+        Attach application-owned provenance to each claim. A grounding failure
+        rejects the chunk and identifies the document and observation involved.
+        """
         result = await self.llm.generate_structured(
             prompt=render_prompt(self.renderer, chunk), response_model=ExtractionResult
         )

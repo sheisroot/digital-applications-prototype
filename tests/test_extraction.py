@@ -42,6 +42,7 @@ def make_chunk(text=QUOTE):
 
 
 def write_pdf(root, document=DOCUMENT, texts=(QUOTE,)):
+    """Write a minimal PDF with one text stream per page for offline ingestion tests."""
     path = root / document.path
     path.parent.mkdir(parents=True, exist_ok=True)
     writer = PdfWriter()

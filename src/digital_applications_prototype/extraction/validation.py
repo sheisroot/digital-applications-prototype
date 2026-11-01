@@ -15,6 +15,12 @@ def normalize_whitespace(text: str) -> str:
 
 
 def validate_observation(item: ModelObservation, chunk: DocumentChunk) -> ImplementationObservation:
+    """Validate a claim and attach deterministic document, page, and ID metadata.
+
+    Require nonempty fields, a short label, and an exact quote match after
+    whitespace normalization. Validate a supplied source page or infer a unique
+    matching page; raise GroundingError rather than repair unsupported output.
+    """
     for field in ("observation", "raw_factor_label", "raw_factor_description", "source_quote"):
         if not getattr(item, field).strip():
             raise GroundingError(f"{field} must not be empty")

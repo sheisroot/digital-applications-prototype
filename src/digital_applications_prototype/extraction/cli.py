@@ -20,6 +20,12 @@ async def run_documents(
     extractor: ImplementationObservationExtractor | None = None,
     dry_run: bool = False, force: bool = False, max_chars: int = 12000,
 ) -> int:
+    """Process documents independently, returning one if any document fails.
+
+    Skip completed documents unless forced and persist only complete results.
+    Dry-run requires one document and reports its first prompt's size without
+    calling the model or writing output.
+    """
     if dry_run and len(documents) != 1:
         raise ValueError("Dry-run requires one document; use --document")
     failed = 0
@@ -88,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         async def execute() -> int:
+            """Run pending documents within the configured LLM client's lifetime."""
             from digital_applications_prototype.core.llm_runtime import configured_llm
 
             async with configured_llm() as llm:

@@ -7,6 +7,7 @@ from .models import DocumentEntry, ImplementationObservation
 
 
 def output_path(root: Path, document: DocumentEntry) -> Path:
+    """Build the document's derived JSONL path, rejecting symlink traversal."""
     path = root.resolve() / "data/derived/extracted" / document.country / f"{document.document_id}.jsonl"
     if path.resolve() != path:
         raise ValueError("Extraction output must not traverse symlinks")
@@ -14,7 +15,11 @@ def output_path(root: Path, document: DocumentEntry) -> Path:
 
 
 def write_observations(path: Path, observations: list[ImplementationObservation]) -> None:
-    """Call only after every chunk succeeds; even zero observations is complete."""
+    """Atomically replace a document's JSONL file after all chunks succeed.
+
+    An empty list still marks completion. Clean up temporary files on failure
+    and preserve any previous output until the replacement is ready.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:

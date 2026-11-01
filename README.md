@@ -81,16 +81,18 @@ client lifecycle; `scripts/llm_smoke.py` shows that wiring with `async with`.
 
 ## Optional live smoke call
 
-Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` and `LLM_MODEL`.
-There was no existing dotenv loader, so settings read the process environment;
-`uv --env-file` supplies optional `.env` loading without another dependency.
-Both values are required when loading settings. Choose an account-accessible
-model that supports structured outputs. `.env` is ignored by Git.
+Create a `.env` file in the project root with `OPENAI_API_KEY` and `LLM_MODEL`.
+The settings layer loads this file once, when settings are first requested, using
+`python-dotenv` with `override=False`. Existing process environment variables take
+precedence, including empty values. The path is resolved from the settings module,
+independently of the current working directory. A missing `.env` is allowed;
+both values must still be nonempty when settings are loaded. Choose an
+account-accessible model that supports structured outputs. `.env` is ignored by Git.
 
 The following command makes a paid API call. It is never run by the test suite:
 
 ```sh
-uv run --env-file .env python scripts/llm_smoke.py
+uv run python scripts/llm_smoke.py
 ```
 
 ## Stage 1 pilot

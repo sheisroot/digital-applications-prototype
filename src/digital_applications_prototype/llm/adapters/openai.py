@@ -18,6 +18,11 @@ class OpenAIAdapter:
     async def generate_structured(
         self, *, prompt: str, response_model: type[T], model: str | None = None
     ) -> T:
+        """Request typed output using the override model or the adapter default.
+
+        Raise StructuredOutputError for refusals, incomplete responses, or
+        missing parsed output; let provider exceptions propagate unchanged.
+        """
         response = await self.client.responses.parse(
             model=model if model is not None else self.model,
             input=prompt,

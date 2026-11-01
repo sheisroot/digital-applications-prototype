@@ -37,6 +37,10 @@ INPUT_DOCUMENTS = (
 
 def select_documents(*, document: str | None = None, country: str | None = None,
                      all_documents: bool = False) -> list[DocumentEntry]:
+    """Select manifest entries in order using exactly one selection mode.
+
+    Raise ValueError for ambiguous selections or selections with no matches.
+    """
     if sum((document is not None, country is not None, all_documents)) != 1:
         raise ValueError("Select exactly one of --document, --country, or --all")
     selected = [entry for entry in INPUT_DOCUMENTS if all_documents

@@ -106,10 +106,11 @@ The local pilot dry-run found 7 pages and 2 chunks. The first chunk covers pages
 This token estimate is informational, not a model tokenizer.
 
 For the opt-in paid run, fill in `OPENAI_API_KEY` and a structured-output-compatible
-`LLM_MODEL` in the ignored `.env` file, then run:
+`LLM_MODEL` in the ignored project-root `.env` file. Settings load it automatically
+once; process environment variables take precedence. Then run:
 
 ```sh
-uv run --env-file .env extract-observations --document KM_ISR07_2023
+uv run extract-observations --document KM_ISR07_2023
 ```
 
 This command processes both chunks of that single ISR. Its result is:
