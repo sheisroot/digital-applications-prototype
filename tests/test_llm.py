@@ -1,21 +1,25 @@
+import asyncio
 import os
+import unittest
 from contextlib import chdir
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import AsyncMock, patch
 
 from jinja2 import UndefinedError
 from pydantic import ValidationError
 
-from digital_applications_prototype.core.config import Settings
 from digital_applications_prototype.core import config
-from digital_applications_prototype.llm.adapters.openai import OpenAIAdapter, StructuredOutputError
+from digital_applications_prototype.core.config import Settings
+from digital_applications_prototype.llm.adapters.base import TokenUsage
+from digital_applications_prototype.llm.adapters.openai import (
+    OpenAIAdapter,
+    StructuredOutputError,
+)
 from digital_applications_prototype.llm.prompt_renderer import PromptRenderer
 from digital_applications_prototype.llm.schemas.smoke import SmokeTestResponse
 from digital_applications_prototype.llm.service import LLMService
-from digital_applications_prototype.llm.adapters.base import TokenUsage
 
 
 class PromptRendererTests(unittest.TestCase):
@@ -118,6 +122,61 @@ class OpenAIAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_provider_usage_stays_unknown(self):
         adapter = self.make_adapter()
         await adapter.generate_structured(prompt="hello", response_model=SmokeTestResponse)
+        self.assertIsNone(adapter.last_usage)
+
+    async def test_concurrent_calls_keep_task_local_usage_including_failure(self):
+        adapter = self.make_adapter()
+        first_finished = asyncio.Event()
+        second_finished = asyncio.Event()
+
+        async def parse(*, input, **kwargs):
+            if input == "second":
+                await first_finished.wait()
+            if input == "failed":
+                await second_finished.wait()
+                raise RuntimeError("provider unavailable")
+            count = 10 if input == "first" else 20
+            return SimpleNamespace(
+                id=input,
+                status="completed",
+                output=[],
+                output_parsed=SmokeTestResponse(summary=input),
+                usage=SimpleNamespace(input_tokens=count, output_tokens=count * 2),
+            )
+
+        self.parse.side_effect = parse
+
+        async def call(prompt):
+            await adapter.generate_structured(
+                prompt=prompt, response_model=SmokeTestResponse
+            )
+            if prompt == "first":
+                first_finished.set()
+                await second_finished.wait()
+            else:
+                second_finished.set()
+            # Force an interleaving after generation before reading usage.
+            await asyncio.sleep(0)
+            return adapter.last_usage
+
+        async def fail():
+            with self.assertRaisesRegex(RuntimeError, "provider unavailable"):
+                await adapter.generate_structured(
+                    prompt="failed", response_model=SmokeTestResponse
+                )
+            return adapter.last_usage
+
+        usages = await asyncio.wait_for(
+            asyncio.gather(call("first"), call("second"), fail()), 3
+        )
+        self.assertEqual(
+            usages,
+            [
+                TokenUsage(input_tokens=10, output_tokens=20),
+                TokenUsage(input_tokens=20, output_tokens=40),
+                None,
+            ],
+        )
         self.assertIsNone(adapter.last_usage)
 
 

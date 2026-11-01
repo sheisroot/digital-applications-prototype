@@ -1,25 +1,41 @@
+import asyncio
+import sqlite3
+import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import UTC, date
 from io import StringIO
 from pathlib import Path
-import sqlite3
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
-import asyncio
 
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
+from test_extraction import (
+    DOCUMENT,
+    QUOTE,
+    FakeAdapter,
+    extractor,
+    make_chunk,
+    observation,
+    span,
+    write_pdf,
+)
 
+from digital_applications_prototype.extraction.chunking import chunk_pages
 from digital_applications_prototype.extraction.cli import run_documents
 from digital_applications_prototype.extraction.models import PageText, RunStatus
-from digital_applications_prototype.extraction.chunking import chunk_pages
 from digital_applications_prototype.llm.adapters.base import TokenUsage
 from digital_applications_prototype.persistence.database import initialize_database
-from digital_applications_prototype.persistence.models import EvidenceSpanRow, ExtractionChunk, ExtractionRun, Observation
-from digital_applications_prototype.persistence.repository import ExtractionRepository, derive_run_status
-
-from test_extraction import DOCUMENT, QUOTE, FakeAdapter, extractor, make_chunk, observation, span, write_pdf
+from digital_applications_prototype.persistence.models import (
+    EvidenceSpanRow,
+    ExtractionChunk,
+    ExtractionRun,
+    Observation,
+)
+from digital_applications_prototype.persistence.repository import (
+    ExtractionRepository,
+    derive_run_status,
+)
 
 
 class StatusTests(unittest.TestCase):
@@ -222,7 +238,8 @@ class DurableOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         ], usages=[TokenUsage(input_tokens=10, output_tokens=20), TokenUsage(input_tokens=30, output_tokens=40)])
         with redirect_stderr(StringIO()):
             self.assertEqual(await run_documents(self.root, [DOCUMENT], extractor=extractor(adapter),
-                                                 max_chars=1, overlap_chars=0, export_files=False), 1)
+                                                 max_chars=1, overlap_chars=0, export_files=False,
+                                                 max_concurrency=1), 1)
         self.assertEqual(snapshots, [
             [(1, "running"), (2, "pending"), (3, "pending")],
             [(1, "completed"), (2, "running"), (3, "pending")],
@@ -253,7 +270,7 @@ class DurableOrchestrationTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(asyncio.CancelledError):
             await run_documents(self.root, [DOCUMENT], extractor=extractor(InterruptedAdapter()),
-                                max_chars=1, overlap_chars=0, export_files=False)
+                                max_chars=1, overlap_chars=0, export_files=False, max_concurrency=1)
         with closing(sqlite3.connect(self.path)) as connection:
             self.assertEqual(connection.execute("SELECT status, finished_at FROM extraction_runs").fetchone(), (None, None))
             self.assertEqual(connection.execute("SELECT status FROM extraction_chunks ORDER BY chunk_index").fetchall(),
@@ -283,7 +300,7 @@ class DurableOrchestrationTests(unittest.IsolatedAsyncioTestCase):
                          "offline-model", "stage1-v3", "elapsed:"):
             self.assertIn(expected, output.getvalue())
 
-    async def test_database_failure_stops_further_paid_calls_without_erasing_previous_chunks(self):
+    async def test_isolated_database_failure_preserves_previous_and_subsequent_chunks(self):
         adapter = FakeAdapter()
         original = ExtractionRepository.persist_completed_chunk
         calls = 0
@@ -295,15 +312,16 @@ class DurableOrchestrationTests(unittest.IsolatedAsyncioTestCase):
                 raise OSError("database unavailable")
             await original(repository, *args, **kwargs)
 
-        with redirect_stderr(StringIO()), patch.object(ExtractionRepository, "persist_completed_chunk", fail_second):
+        with redirect_stderr(StringIO()) as errors, patch.object(ExtractionRepository, "persist_completed_chunk", fail_second):
             await run_documents(self.root, [DOCUMENT], extractor=extractor(adapter),
-                                max_chars=1, export_files=False)
-        self.assertEqual(len(adapter.calls), 2)
+                                max_chars=1, export_files=False, max_concurrency=1)
+        self.assertEqual(len(adapter.calls), 3)
+        self.assertIn("result persistence failed: OSError: database unavailable", errors.getvalue())
         with closing(sqlite3.connect(self.path)) as connection:
             self.assertEqual(connection.execute("SELECT status FROM extraction_runs").fetchone()[0], "partial")
             self.assertEqual(connection.execute("SELECT status FROM extraction_chunks ORDER BY chunk_index").fetchall(),
-                             [("completed",), ("running",), ("pending",)])
-            self.assertEqual(connection.execute("SELECT count(*) FROM implementation_observations").fetchone()[0], 1)
+                             [("completed",), ("failed",), ("completed",)])
+            self.assertEqual(connection.execute("SELECT count(*) FROM implementation_observations").fetchone()[0], 2)
 
 
 if __name__ == "__main__":

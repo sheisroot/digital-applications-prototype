@@ -31,6 +31,7 @@ src/digital_applications_prototype/
     └── implementation_observations.jinja2
 tests/test_extraction.py              # Offline feature, PDF, CLI and boundary tests
 tests/test_persistence.py             # Temporary SQLite durability and audit tests
+tests/test_concurrency.py             # Bounded calls, completion order, failure isolation
 ```
 
 `pyproject.toml` includes `pypdf`, `sqlalchemy[asyncio]`, `aiosqlite`, and the
@@ -55,6 +56,8 @@ rule covers the database, WAL/SHM sidecars, and file exports.
    Add bounded trailing context from the previous chunk, as described below.
    Empty pages retain their page numbers; all-empty chunks are omitted. Register all
    intended chunks as pending, then mark each running before its model call.
+   Process at most `--concurrency N` chunks concurrently within that document
+   (default 3, minimum 1). Document selections are still processed sequentially.
 4. Render the extraction template with application metadata and numbered page text.
    The feature calls `LLMService.generate_structured` with `ExtractionResult`.
    Provider wiring lives in `core/llm_runtime.py`; the extraction package imports
@@ -282,12 +285,13 @@ OCR, reconstruct complex tables, or infer printed report page numbers.
 are no migrations or manual SQL setup. CLI startup uses
 `<root>/data/derived/stage1.sqlite`. The async engine uses aiosqlite, WAL,
 foreign keys, a 30-second busy timeout, and FULL synchronous commits. The session
-factory uses `expire_on_commit=False`. Model calls remain sequential and hold no
-DB session. Each repository method opens a short session/transaction.
+factory uses `expire_on_commit=False`. Model calls run concurrently within one
+document and hold no DB session. Each repository method opens a short
+session/transaction; all calls to these methods belong to the orchestrator.
 
 | Table | Stored state and constraints |
 | --- | --- |
-| `extraction_runs` | Timestamp/UUID `run_id` primary key, indexed document ID, UTC start/finish, final status, model, schema version, max concurrency (1), token totals, error |
+| `extraction_runs` | Timestamp/UUID `run_id` primary key, indexed document ID, UTC start/finish, final status, model, schema version, configured max concurrency, token totals, error |
 | `extraction_chunks` | Integer `chunk_id` primary key, run FK, 1-based chunk index and page range, pending/running/completed/failed status, tokens, UTC start/finish, error/type, validation warnings JSON; unique `(run_id, chunk_index)` and index on run/status |
 | `implementation_observations` | Integer `observation_id` primary key, domain `provenance_id`, run/chunk FKs, 1-based observation index, every Stage 1 semantic/document/chunk field, actors/context/response JSON arrays, evidence summary, validation status, original model output JSON, self-FK `duplicate_of_observation_id`; unique `(chunk_id, observation_index)` and indexes for clean queries |
 | `evidence_spans` | Integer primary key, observation FK, 1-based `span_index`, verbatim quote, physical page, optional evidence date, role; unique `(observation_id, span_index)` and indexed observation FK |
@@ -316,9 +320,29 @@ COMMIT
 
 An insert failure rolls back the entire chunk, including the completed transition
 and usage. A whole-chunk provider/schema failure instead commits `failed`, its
-error/type, and finish time. It does not erase earlier chunk commits. A database
-write failure aborts further model calls; earlier successful chunks remain stored,
-and unfinished chunks stay running/pending for inspection and future retry work.
+error/type, and finish time. It does not erase earlier chunk commits. A result-write
+failure is logged separately and recorded in the run error; the orchestrator attempts
+to mark the chunk failed using a fresh transaction. It continues sibling work if
+that succeeds. If failure-state persistence also fails, or a chunk cannot be marked
+running, it stops admitting new calls while draining already active tasks and
+attempting to persist their outcomes. Uncommitted results never count as completed.
+Earlier commits remain stored; unfinished chunks stay running/pending for inspection.
+
+The orchestrator maintains a sliding window of at most `max_concurrency` tasks and
+uses `asyncio.wait(..., return_when=FIRST_COMPLETED)` to receive results. A slot is
+replenished after its result is persisted. Each task owns only prompt rendering,
+remote generation, parsing, deterministic observation validation, and its result.
+The orchestrator owns running/terminal transitions, all database sessions, failure
+recording, and document finalization. Ordinary task exceptions are caught individually.
+There is no task-owned transaction or shared `AsyncSession`. On cancellation,
+children are cancelled and awaited before the client/database close; cancellation
+propagates without fabricating final chunk or run state.
+
+OpenAI `last_usage` metadata is task-local via `ContextVar`, preserving the existing
+typed generation interface. Each chunk carries its own usage to persistence;
+final totals still derive from committed chunks. Injected adapters with optional
+usage metadata must likewise make it available to the calling task immediately
+after generation.
 
 After chunk attempts, `mark_duplicates(run_id)` applies the same exact-evidence
 signature rule as before and is safe to rerun, including on partial runs. Rejected
@@ -372,8 +396,11 @@ concurrency, and elapsed time. `observations_returned = valid + repaired + rejec
 The compatibility fields `duplicates_removed` and `observations_persisted` now mean
 **duplicates marked** and **clean observations stored**, respectively. The latter is
 `valid + repaired - duplicates_marked`, including for partial runs. All returned
-observations are stored regardless of that clean count. `max_concurrency=1` is also
-included in the report.
+observations are stored regardless of that clean count. The configured
+`max_concurrency` is included in the run record and report (default 3 for the CLI).
+Clean queries, exports, warnings, and failure reports follow source chunk index,
+then observation/span index. SQLite row IDs and commit timestamps can reflect
+completion order; they do not determine analytical order or duplicate selection.
 
 ## Optional file exports
 
@@ -448,6 +475,15 @@ directory.
 requires a single-document selection. No real model call was run during this
 refinement.
 
+For the next PAD pilot, use the default three concurrent chunk calls, or choose a
+different bound. These are live commands and are not run by the test suite:
+
+```sh
+uv run extract-observations --document KM_PAD_2020 --concurrency 3
+uv run extract-observations --document KM_PAD_2020 --concurrency 1
+uv run extract-observations --document KM_PAD_2020 --concurrency 4
+```
+
 ## Offline validation
 
 ```sh
@@ -473,8 +509,13 @@ dates versus repaired NULL dates, rejected empty evidence, retained overlap dupl
 rerunnable duplicate marking, coverage status derivation, atomic rollback on an
 actual evidence-insert failure, independent-connection visibility before the next
 model call, two committed chunks surviving a third failure, cancellation preserving
-unfinished state, export reservation failures, and stopping further paid calls on a
-database failure. The entire suite uses fakes and makes no paid model calls.
+unfinished state, export reservation failures, and isolating a chunk database failure.
+Concurrency tests use events to force overlapping calls and reversed completion;
+they verify limits of 1/3/4, prompt independent-connection visibility, source-ordered
+exports and partial-run dedupe, observation repair/rejection, task-local token usage,
+serialized writes, persistence failure isolation, admission stopping when failure
+recording also fails, and cancellation cleanup. The entire suite uses fakes and
+makes no paid model calls.
 
 The hierarchy remains source document → exact evidence spans → atomic observation →
 factor description. Embeddings, clusters, canonical titles, and cross-case lessons

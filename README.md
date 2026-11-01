@@ -52,8 +52,9 @@ is retained; no additional retry or logging framework is introduced. Prompts and
 credentials are not logged. Only the concrete adapter and application composition
 code import the provider SDK.
 The adapter also exposes optional last-call token counts through `LLMService`.
-Stage 1 reads this metadata immediately after each successful sequential call;
-adapters without usage metadata remain supported.
+The OpenAI adapter isolates these counts per async task. Stage 1 reads them in the
+calling task immediately after generation; adapters without usage metadata remain
+supported.
 
 ## Future feature service example
 
@@ -111,14 +112,20 @@ uv run extract-observations --document KM_ISR07_2023
 
 # SQLite only, without JSONL/report exports
 uv run extract-observations --document KM_ISR07_2023 --no-export
+
+# Override the default of 3 concurrent chunk calls (1 runs sequentially)
+uv run extract-observations --document KM_PAD_2020 --concurrency 4
 ```
 
 Live execution is the default for an explicit `--document`, `--country`, or `--all`
 selection. SQLite at `data/derived/stage1.sqlite` is the canonical extraction record;
 startup creates its directory and schema automatically. Every live document attempt
-gets a new UTC timestamp/UUID run ID. Each successful chunk commits all observations
-(including rejected ones), ordered evidence spans, warnings, and token usage before
-the next model call. Later failures or interruption preserve earlier committed work.
+gets a new UTC timestamp/UUID run ID. Within one document, up to 3 chunk extractions
+run concurrently (`--concurrency N`, minimum 1). Documents are processed sequentially.
+The orchestrator commits each completed chunk's observations (including rejected
+ones), ordered evidence spans, warnings, and token usage promptly. Database writes
+are serialized and no model call owns a database session. Later failures or
+interruption preserve earlier committed work.
 
 Final status follows chunk coverage: `completed` for all chunks, `partial` for some,
 and `failed` for none. Warnings remain separate. Overlap duplicates stay stored with

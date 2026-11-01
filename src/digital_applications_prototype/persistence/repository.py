@@ -9,10 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from digital_applications_prototype.extraction.models import (
-    ChunkExtractionResult, ChunkFailure, DocumentChunk, ImplementationObservation,
-    RunReport, RunStatus, ValidationWarning,
+    ChunkExtractionResult,
+    ChunkFailure,
+    DocumentChunk,
+    ImplementationObservation,
+    RunReport,
+    RunStatus,
+    ValidationWarning,
 )
-from digital_applications_prototype.extraction.validation import observation_duplicate_indexes
+from digital_applications_prototype.extraction.validation import (
+    observation_duplicate_indexes,
+)
 
 from .models import EvidenceSpanRow, ExtractionChunk, ExtractionRun, Observation
 
@@ -58,15 +65,24 @@ class ExtractionRepository:
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
-    async def create_run(self, document_id: str, *, model: str | None = None) -> str:
+    async def create_run(
+        self, document_id: str, *, model: str | None = None, max_concurrency: int = 1
+    ) -> str:
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
         started = datetime.now(UTC)
         run_id = f"{started:%Y%m%dT%H%M%SZ}_{uuid4().hex}"
         async with self.sessions.begin() as session:
-            session.add(ExtractionRun(
-                run_id=run_id, document_id=document_id, started_at=started.isoformat(),
-                model=model, schema_version=RunReport.model_fields["schema_version"].default,
-                max_concurrency=1,
-            ))
+            session.add(
+                ExtractionRun(
+                    run_id=run_id,
+                    document_id=document_id,
+                    started_at=started.isoformat(),
+                    model=model,
+                    schema_version=RunReport.model_fields["schema_version"].default,
+                    max_concurrency=max_concurrency,
+                )
+            )
         return run_id
 
     async def set_run_model(self, run_id: str, model: str | None) -> None:

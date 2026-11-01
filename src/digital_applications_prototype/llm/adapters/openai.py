@@ -1,5 +1,7 @@
 """Translate the OpenAI Responses API into the generic adapter contract."""
 
+from contextvars import ContextVar
+
 from openai import AsyncOpenAI
 
 from .base import T, TokenUsage
@@ -14,7 +16,14 @@ class OpenAIAdapter:
         # The application owns the client lifecycle (use async with AsyncOpenAI).
         self.client = client
         self.model = model
-        self.last_usage: TokenUsage | None = None
+        self._last_usage: ContextVar[TokenUsage | None] = ContextVar(
+            "openai_last_usage", default=None
+        )
+
+    @property
+    def last_usage(self) -> TokenUsage | None:
+        """Usage for the latest call in the current task, isolated from sibling calls."""
+        return self._last_usage.get()
 
     async def generate_structured(
         self, *, prompt: str, response_model: type[T], model: str | None = None
@@ -24,7 +33,7 @@ class OpenAIAdapter:
         Raise StructuredOutputError for refusals, incomplete responses, or
         missing parsed output; let provider exceptions propagate unchanged.
         """
-        self.last_usage = None
+        self._last_usage.set(None)
         response = await self.client.responses.parse(
             model=model if model is not None else self.model,
             input=prompt,
@@ -39,13 +48,18 @@ class OpenAIAdapter:
             if item.type == "message":
                 for content in item.content:
                     if content.type == "refusal":
-                        raise StructuredOutputError(f"OpenAI refused: {content.refusal}")
+                        raise StructuredOutputError(
+                            f"OpenAI refused: {content.refusal}"
+                        )
         if response.output_parsed is None:
             raise StructuredOutputError(
                 f"OpenAI response {response.id} contained no parsed output"
             )
         usage = getattr(response, "usage", None)
         if usage is not None:
-            self.last_usage = TokenUsage(input_tokens=usage.input_tokens,
-                                         output_tokens=usage.output_tokens)
+            self._last_usage.set(
+                TokenUsage(
+                    input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
+                )
+            )
         return response.output_parsed

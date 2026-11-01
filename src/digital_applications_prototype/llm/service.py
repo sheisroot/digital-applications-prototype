@@ -14,7 +14,8 @@ class LLMService:
     @property
     def last_usage(self) -> TokenUsage | None:
         # Optional metadata; the typed generation contract remains unchanged.
-        # Read immediately after a successful call in this sequential pipeline.
+        # Read in the calling task immediately after generation. Concurrent adapters
+        # must isolate this metadata per task, as the OpenAI adapter does.
         return getattr(self.adapter, "last_usage", None)
 
     async def generate_structured(
