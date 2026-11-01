@@ -13,6 +13,9 @@ Return observations using the supplied response schema. An empty observations li
 Prefer fewer high-confidence records over exhaustive speculative extraction.
 One record = one implementation claim. Split distinct constraints, actions, adaptations,
 and outcomes. Do not bundle several factors into one record. Do not invent causality.
+When a passage contains both a condition/problem and a substantively meaningful response
+or adaptation, create separate observations if each is an independently useful
+implementation mechanism. Do not over-atomize trivial statements.
 
 Extract evidence about implementation success or failure, operational constraints,
 enabling conditions, delivery mechanisms, stakeholder behavior or coordination,
@@ -21,36 +24,95 @@ sustainability, user/service reach, and implementation outcomes. These are relev
 cues, NOT taxonomy labels. Normally ignore routine approval dates, generic objectives,
 financial boilerplate, ordinary budget reporting, and procurement lists unless the
 source establishes their material effect on implementation.
+Do not disproportionately select problems, delays, or failures. Also seek meaningful
+enablers, implementation progress, prerequisites, adaptations, successful delivery
+mechanisms, milestones, outcomes, and design or operational tradeoffs. Avoid routine
+progress updates that do not explain how implementation worked.
+Treat explicitly stated dependencies and prerequisites as relevant when they materially
+affect sequencing or feasibility, e.g. database cleaning required before a registry update.
+Extract substantive tradeoffs comparing cost, feasibility, expected benefit, implementation
+burden, local demand, or alternative delivery approaches. Do not turn them into advice.
 
 Structural fields:
 - observation_type: condition, action, adaptation, or outcome.
 - valence: enabler, constraint, neutral, or mixed, as supported by the passage.
-- claim_scope: observed, reported, anticipated, recommended, or inferred. Preserve
-  the source's epistemic status: plans and PAD expectations are not achieved outcomes;
-  attributed statements are reported. Use inferred only for strongly supported implications.
-  recommended is only for an explicit recommendation IN the source, never advice you create.
+  A condition preventing an activity or system from becoming operational is normally
+  a constraint. Use neutral only when no positive or negative directional effect is
+  supported. Do not infer valence merely because something sounds desirable or undesirable.
+- claim_scope:
+  actual: presented as having occurred or being the case as of the relevant evidence date.
+  planned: an intended, scheduled, proposed, or committed future action, not yet completed.
+  anticipated: a source-authored expected, projected, prospective, or uncertain future
+  condition/effect. For example, "The Switch may become more expensive" is anticipated,
+  not a completed outcome or your own inference. "The project will relaunch procurement"
+  is planned. Preserve the source's uncertainty.
+  recommended: an explicit recommendation IN the source, never advice you create.
+  inferred: requires limited interpretation beyond explicit wording; use sparingly.
 - evidence_strength: explicit, strongly_implied, or weakly_implied. Prefer explicit
   or strongly implied claims; omit speculative or weakly supported claims.
 
 Semantic fields remain bottom-up, with no predefined domain taxonomy:
 - observation: a clear factual implementation claim, not a lesson or new recommendation.
-- raw_factor_label: descriptive noun phrase, approximately 2–6 words, no project or
-  country names, not a full sentence. Preserve vocabulary specific to this passage;
-  do not canonicalize different concepts or force labels into shared categories.
-- raw_factor_description: approximately 8–25 words explaining the mechanism, removing
-  incidental project-specific details while distinguishing related concepts. Avoid
-  generic descriptions that lose the mechanism.
+- factor_description: a concise, mechanism-level semantic representation of the
+  implementation condition, action, adaptation, or outcome expressed by the observation.
+  It is not a canonical category or taxonomy assignment. Use approximately 8–25 words;
+  retain the mechanism and enough specificity for embeddings to distinguish related
+  mechanisms. Remove incidental project-specific detail and project names; avoid country
+  names, institution acronyms, and named systems unless essential to the mechanism.
+  Do not make a label, predefined taxonomy assignment, lesson, or recommendation.
+  Examples: "Absence of a designated coordination focal point prevented follow-through
+  on agreed activities." and "Dependence on uncommitted third-party infrastructure
+  suppliers undermined the feasibility of procurement responses."
 - implementation_area: free text if supported, otherwise null.
 - actors, condition_or_context, action_or_response: supported details only; [] if absent.
 - observed_effect: null unless supported; do not turn an anticipated effect into an observed one.
 
-Grounding:
-- source_quote: shortest sufficient verbatim supporting passage from the excerpt.
-  Preserve wording and punctuation; no paraphrases, ellipses, or invented connections.
-  Do not quote the application metadata or PDF page markers.
-- source_page: physical PDF page number from the markers when the entire quote occurs
-  on one page; null if it spans pages or is uncertain. Never use printed report pagination.
+Temporal provenance:
+- Each evidence span has its own evidence_date: a date or "as of" date explicitly
+  associated with that span, e.g. indicator measurement date, status date, reporting
+  cutoff, or dated result value. Return YYYY-MM-DD when explicitly available; otherwise
+  null. Do not invent missing day/month components or infer a date from document_date.
+- A populated evidence_date MUST be established by the quotation of that same span.
+  If the date and substantive statement occur separately, use separate evidence spans;
+  attach the date to the span containing the source date and leave undated prose null.
+- Distinguish document publication/reporting date from the underlying evidence date.
+  Preserve explicit evidence dates in results, indicators, monitoring tables, and measurements.
+  Do not describe historical or stale values as the current project state unless supported.
+  An Actual value of 0 dated May 13, 2022 in a September 2023 ISR pertains to 2022-05-13;
+  it does not establish a zero value as of September 2023.
+
+Evidence and grounding:
+- Every observation requires evidence.spans with at least one exact source span.
+  Use the smallest set of source spans collectively sufficient for the observation
+  and all materially populated fields, including factor_description, observed_effect,
+  action_or_response, condition_or_context, and each span's evidence_date.
+  Prefer one concise contiguous span when sufficient. Multiple spans may be nearby or
+  non-contiguous passages jointly establishing ONE coherent claim. Multiple citations
+  do not justify bundling independently useful implementation mechanisms into one claim.
+- Each span has quote, page, evidence_date, and role. quote must be verbatim source
+  text with original wording and punctuation. No paraphrases, reconstructed quotations,
+  ellipses, or concatenation of distant passages into one quote. Do not quote metadata
+  or PDF page markers. page is the required physical PDF page number from the markers,
+  never printed report pagination. Each quote must occur entirely on that page;
+  split a passage crossing page boundaries into separate exact spans.
+- Span roles: supports directly contributes evidence and is the default, most common
+  role. qualifies adds a material limitation, temporal caveat, or boundary condition.
+  contradicts conflicts with or challenges another part of the claim/evidence; use
+  rarely and do not silently reconcile conflicts. context adds necessary surrounding
+  information without establishing the claim; use sparingly, not for interesting nearby text.
+- evidence.summary is optional DERIVED prose explaining how spans jointly support or
+  qualify the claim. Populate it only when multiple spans need explanation or a short
+  explanation helps interpret the evidence. Prefer null for one straightforward span.
+  A summary may paraphrase but is not direct source evidence or a replacement for spans.
+- If a structured field lacks support from the evidence spans, add the relevant span
+  or leave that field empty. This especially applies to effects, responses, contexts,
+  and dates. Do not add unnecessary spans or excessively large passages.
+- Cite only text supplied to THIS call, including any trailing overlap. Do not invent
+  evidence from other chunks, create joint bundles from unavailable passages, or perform
+  cross-chunk synthesis. Related evidence unavailable together may yield separate claims.
 - Leave optional values null/empty instead of guessing.
+- Initial trailing overlap, when marked, is source text from the preceding chunk's page.
+  It may be partial. Use its physical page number and do not quote the overlap annotation.
 - Do not generate cross-project lessons, comparisons, canonical labels, clusters,
   holdout analysis, or your own recommendations.
 

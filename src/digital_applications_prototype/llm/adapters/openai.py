@@ -2,7 +2,7 @@
 
 from openai import AsyncOpenAI
 
-from .base import T
+from .base import T, TokenUsage
 
 
 class StructuredOutputError(RuntimeError):
@@ -14,6 +14,7 @@ class OpenAIAdapter:
         # The application owns the client lifecycle (use async with AsyncOpenAI).
         self.client = client
         self.model = model
+        self.last_usage: TokenUsage | None = None
 
     async def generate_structured(
         self, *, prompt: str, response_model: type[T], model: str | None = None
@@ -23,6 +24,7 @@ class OpenAIAdapter:
         Raise StructuredOutputError for refusals, incomplete responses, or
         missing parsed output; let provider exceptions propagate unchanged.
         """
+        self.last_usage = None
         response = await self.client.responses.parse(
             model=model if model is not None else self.model,
             input=prompt,
@@ -42,4 +44,8 @@ class OpenAIAdapter:
             raise StructuredOutputError(
                 f"OpenAI response {response.id} contained no parsed output"
             )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.last_usage = TokenUsage(input_tokens=usage.input_tokens,
+                                         output_tokens=usage.output_tokens)
         return response.output_parsed

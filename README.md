@@ -35,7 +35,6 @@ src/digital_applications_prototype/
         └── smoke.py            # Trivial SmokeTestResponse Pydantic model
 scripts/llm_smoke.py             # Explicit, opt-in live composition example
 tests/test_llm.py               # Offline renderer, service, adapter, config checks
-.env.example                    # Credential-free configuration template
 ```
 
 Feature service → prompt renderer → LLM service → adapter → provider → typed result.
@@ -52,6 +51,9 @@ parsed output raise `StructuredOutputError`. The SDK's built-in retry behavior
 is retained; no additional retry or logging framework is introduced. Prompts and
 credentials are not logged. Only the concrete adapter and application composition
 code import the provider SDK.
+The adapter also exposes optional last-call token counts through `LLMService`.
+Stage 1 reads this metadata immediately after each successful sequential call;
+adapters without usage metadata remain supported.
 
 ## Future feature service example
 
@@ -98,8 +100,23 @@ uv run python scripts/llm_smoke.py
 ## Stage 1 pilot
 
 ```sh
+# Inspect without calling the model or writing run artifacts
 uv run extract-observations --document KM_ISR07_2023 --dry-run
+
+# Normal live extraction using the configured model
+uv run extract-observations --document KM_ISR07_2023
+
+# Another live run creates new artifacts and preserves the earlier run
+uv run extract-observations --document KM_ISR07_2023
 ```
 
+Live execution is the default for an explicit `--document`, `--country`, or `--all`
+selection. Every live document attempt gets an immutable UTC timestamp/UUID run ID
+and a `.report.json` where the output location is writable. Only fully covered
+`completed` runs produce a paired downstream-ready JSONL. `partial` means some
+chunks failed; `failed` means no chunks succeeded or document publication failed.
+Warnings are separate metadata: a completed run can contain repairs and rejected
+observations. Previous artifacts are never overwritten or used to skip a new run.
+
 See [Stage 1 documentation](docs/stage1.md) for the file tree, execution flow,
-validation rules, reruns, and the opt-in one-document model command.
+validation rules, run reports, and one-document pilot commands.

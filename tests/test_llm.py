@@ -15,6 +15,7 @@ from digital_applications_prototype.llm.adapters.openai import OpenAIAdapter, St
 from digital_applications_prototype.llm.prompt_renderer import PromptRenderer
 from digital_applications_prototype.llm.schemas.smoke import SmokeTestResponse
 from digital_applications_prototype.llm.service import LLMService
+from digital_applications_prototype.llm.adapters.base import TokenUsage
 
 
 class PromptRendererTests(unittest.TestCase):
@@ -55,6 +56,16 @@ class LLMServiceTests(unittest.IsolatedAsyncioTestCase):
         await LLMService(adapter).generate_structured(prompt="example", response_model=SmokeTestResponse)
         self.assertIsNone(adapter.calls[0][2])
 
+    async def test_optional_model_and_usage_metadata(self):
+        adapter = FakeAdapter()
+        service = LLMService(adapter)
+        self.assertIsNone(service.model)
+        self.assertIsNone(service.last_usage)
+        adapter.model = "offline-model"
+        adapter.last_usage = TokenUsage(input_tokens=12, output_tokens=34)
+        self.assertEqual(service.model, "offline-model")
+        self.assertEqual(service.last_usage.output_tokens, 34)
+
 
 class OpenAIAdapterTests(unittest.IsolatedAsyncioTestCase):
     def make_adapter(self, **changes):
@@ -94,6 +105,20 @@ class OpenAIAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError) as raised:
             await adapter.generate_structured(prompt="hello", response_model=SmokeTestResponse)
         self.assertIs(raised.exception, error)
+
+    async def test_provider_usage_is_captured_and_reset_on_failure(self):
+        adapter = self.make_adapter(usage=SimpleNamespace(input_tokens=100, output_tokens=200))
+        await adapter.generate_structured(prompt="hello", response_model=SmokeTestResponse)
+        self.assertEqual(adapter.last_usage, TokenUsage(input_tokens=100, output_tokens=200))
+        self.parse.side_effect = RuntimeError("unavailable")
+        with self.assertRaises(RuntimeError):
+            await adapter.generate_structured(prompt="hello", response_model=SmokeTestResponse)
+        self.assertIsNone(adapter.last_usage)
+
+    async def test_missing_provider_usage_stays_unknown(self):
+        adapter = self.make_adapter()
+        await adapter.generate_structured(prompt="hello", response_model=SmokeTestResponse)
+        self.assertIsNone(adapter.last_usage)
 
 
 class SettingsTests(unittest.TestCase):
