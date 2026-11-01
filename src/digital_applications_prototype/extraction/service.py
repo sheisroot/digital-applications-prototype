@@ -3,7 +3,7 @@
 from digital_applications_prototype.llm.prompt_renderer import PromptRenderer
 from digital_applications_prototype.llm.service import LLMService
 
-from .models import ChunkExtractionResult, DocumentChunk, ExtractionResult
+from .models import AuditedObservation, ChunkExtractionResult, DocumentChunk, ExtractionResult
 from .validation import validate_observation
 
 
@@ -31,7 +31,8 @@ class ImplementationObservationExtractor:
     async def extract(self, chunk: DocumentChunk) -> ChunkExtractionResult:
         """Validate every observation independently after a schema-valid response.
 
-        Return usable claims, counts, warnings, and optional last-call usage.
+        Return usable claims, every raw/validated outcome for audit, counts,
+        warnings, and optional last-call usage.
         Provider, prompt, and whole-response schema failures propagate as chunk
         failures; observation rejections do not stop subsequent observations.
         """
@@ -42,6 +43,8 @@ class ImplementationObservationExtractor:
                                           usage=self.llm.last_usage)
         for index, item in enumerate(result.observations, start=1):
             validated = validate_observation(item, chunk, observation_index=index)
+            extracted.observation_results.append(AuditedObservation(
+                model_observation=item, validation=validated))
             field = f"observations_{validated.status}"
             setattr(extracted, field, getattr(extracted, field) + 1)
             extracted.warnings.extend(validated.warnings)

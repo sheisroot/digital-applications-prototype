@@ -20,22 +20,31 @@ src/digital_applications_prototype/
 │   ├── chunking.py                    # Deterministic page-boundary chunks
 │   ├── service.py                     # Prompt → LLMService → validated observations
 │   ├── validation.py                  # Grounding, page checks and deterministic IDs
-│   ├── persistence.py                 # Atomic document-level JSONL writes
+│   ├── persistence.py                 # Optional atomic JSONL/report exports
 │   └── cli.py                         # Selection, dry-run and document orchestration
+├── persistence/
+│   ├── __init__.py                    # Local persistence package
+│   ├── database.py                    # Async SQLite engine, schema, WAL and FK setup
+│   ├── models.py                      # Four SQLAlchemy storage models
+│   └── repository.py                  # Short chunk transactions, queries, finalization
 └── llm/prompts/
     └── implementation_observations.jinja2
 tests/test_extraction.py              # Offline feature, PDF, CLI and boundary tests
+tests/test_persistence.py             # Temporary SQLite durability and audit tests
 ```
 
-`pyproject.toml` adds `pypdf` and the `extract-observations` command; `uv.lock`
-records the resolved dependency. The existing `data/` ignore rule is sufficient.
+`pyproject.toml` includes `pypdf`, `sqlalchemy[asyncio]`, `aiosqlite`, and the
+`extract-observations` command; `uv.lock` records resolved dependencies. SQLAlchemy’s
+asyncio extra supplies its required greenlet dependency. The existing `data/` ignore
+rule covers the database, WAL/SHM sidecars, and file exports.
 
 ## Execution flow
 
 1. Select one manifest entry with `--document`, or explicitly select a country or
    the input corpus. A selection remains required; no selection never means the
    whole corpus. Live is the default; `--dry-run` is the inspection-only mode.
-   Reserve a unique artifact pair for each live document attempt before extraction.
+   Initialize SQLite and create a run before reading the document. When file exports
+   are enabled, reserve a unique artifact pair independently of extraction success.
    Selection never scans directories. Project IDs and dates are
    explicit: cover dates for PAD/AF papers and archive dates for ISRs. Dates not
    established on restructuring covers are null rather than inferred from filenames.
@@ -44,7 +53,8 @@ records the resolved dependency. The existing `data/` ignore rule is sufficient.
 3. Group consecutive pages using a soft character target (`--max-chars`, default
    12000). Full pages are never split, so an oversized page can exceed the target.
    Add bounded trailing context from the previous chunk, as described below.
-   Empty pages retain their page numbers; all-empty chunks are omitted.
+   Empty pages retain their page numbers; all-empty chunks are omitted. Register all
+   intended chunks as pending, then mark each running before its model call.
 4. Render the extraction template with application metadata and numbered page text.
    The feature calls `LLMService.generate_structured` with `ExtractionResult`.
    Provider wiring lives in `core/llm_runtime.py`; the extraction package imports
@@ -56,10 +66,20 @@ records the resolved dependency. The existing `data/` ignore rule is sufficient.
    are cleared with warnings, and ungrounded claims are rejected with warnings.
    Subsequent observations are still examined. Call/schema failures are recorded as
    chunk failures, and remaining chunks are attempted without an additional retry layer.
-6. Attach manifest metadata, chunk page range, and a SHA-256-derived observation ID.
-   Remove duplicate claims conservatively. Only full-coverage runs atomically publish
-   JSONL to `data/derived/extracted/<country>/<document_id>__<run_id>.jsonl`.
-   Write a paired final run report for completed, partial, and failed attempts.
+6. Attach manifest metadata, chunk page range, and a SHA-256-derived provenance ID.
+   Immediately commit each successful chunk’s completed state, token usage, warnings,
+   every model observation and its validation status, and ordered evidence spans in
+   one short transaction. Repaired rows use the validated fields; original model
+   output is also retained as JSON. Rejected rows retain their original fields,
+   including ungrounded spans or an empty evidence list. Chunk-level failures commit
+   a failed state and error independently, then extraction continues.
+7. Apply deterministic overlap deduplication in source chunk/observation order and
+   mark duplicates without deleting them. Finalize status and token totals from
+   persisted chunk state. Summaries and clean observations are queried from SQLite.
+   By default, completed runs also export clean JSONL to
+   `data/derived/extracted/<country>/<document_id>__<run_id>.jsonl`, and all final
+   outcomes export a paired report. `--no-export` disables both files. Export
+   errors never determine extraction correctness or status.
 
 ## Semantic and temporal fields
 
@@ -217,8 +237,9 @@ Quotes, pages, and roles are never weakened or removed to retain an ungrounded c
 Pydantic separately rejects malformed whole responses and invalid calendar dates/roles
 as chunk-level failures. A structurally valid empty span list reaches deterministic
 validation and rejects only its observation. Missing evidence fields or malformed
-span objects are schema failures. Final persisted observation models also enforce
-at least one span, so empty evidence can never enter a scientific JSONL.
+span objects are schema failures. The clean `ImplementationObservation` model also enforces
+at least one span, so empty evidence cannot enter scientific JSONL. The database
+retains rejected raw observations separately for audit, including empty span lists.
 
 The spans must collectively support the claim and its materially populated effects,
 responses, and contexts. The prompt requests another span or an empty field when
@@ -228,23 +249,26 @@ need pilot review. The derived summary is persisted without quotation validation
 
 ## Provenance signatures, IDs, and duplicates
 
-Before persistence, retain the first observation with the same signature:
+After chunk persistence, mark later valid/repaired observations with the same signature:
 
 ```text
 (document_id, observation_type, sorted((page, normalized_quote, role) for each span))
 ```
 
-This removes overlap duplicates even when generated observations, factor descriptions,
+This marks overlap duplicates even when generated observations, factor descriptions,
 summaries, span order, or chunk boundaries differ. Different observation types preserve
 legitimate same-passage condition/action claims. Different pages, quotes, roles, span
 collections, and documents remain distinct. There is no semantic deduplication.
 
-`observation_id` is now the document ID followed by the first 24 hex characters of a
+The domain `ImplementationObservation.observation_id` is the document ID followed by
+the first 24 hex characters of a
 SHA-256 digest of that same signature. Generated wording, interpreted evidence dates,
 and chunk ranges no longer affect IDs. Changing source evidence, its role or page,
 or observation type changes the ID. The persisted chunk range still records where
-the retained observation was extracted. This deliberately changes IDs from the two
-earlier pilot schemas; those files are not migrated.
+the observation was extracted. In SQLite this ID is stored as `provenance_id`;
+the integer `observation_id` primary key uniquely identifies each model-produced row,
+including duplicate instances and repeated runs. Rejected observations have no
+validated provenance ID. Existing pilot files are not migrated.
 
 [pypdf](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) is a lightweight,
 pure-Python dependency with page-level text extraction. It does not require an OCR
@@ -252,95 +276,126 @@ stack. Documents with no extractable text fail visibly and request inspection fo
 OCR needs; individual empty pages emit warnings. This version does not automatically
 OCR, reconstruct complex tables, or infer printed report page numbers.
 
-## Run completeness and immutable artifacts
+## SQLite schema and lifecycle
 
-Every selected live invocation is a new attempt, regardless of earlier output.
-Each document receives a filesystem-safe UTC timestamp plus a random suffix:
+`initialize_database(path)` creates parent directories and tables explicitly; there
+are no migrations or manual SQL setup. CLI startup uses
+`<root>/data/derived/stage1.sqlite`. The async engine uses aiosqlite, WAL,
+foreign keys, a 30-second busy timeout, and FULL synchronous commits. The session
+factory uses `expire_on_commit=False`. Model calls remain sequential and hold no
+DB session. Each repository method opens a short session/transaction.
 
-```text
-KM_ISR07_2023__20261101T203456Z_a1b2c3d4e5f6.jsonl
-KM_ISR07_2023__20261101T203456Z_a1b2c3d4e5f6.report.json
-```
+| Table | Stored state and constraints |
+| --- | --- |
+| `extraction_runs` | Timestamp/UUID `run_id` primary key, indexed document ID, UTC start/finish, final status, model, schema version, max concurrency (1), token totals, error |
+| `extraction_chunks` | Integer `chunk_id` primary key, run FK, 1-based chunk index and page range, pending/running/completed/failed status, tokens, UTC start/finish, error/type, validation warnings JSON; unique `(run_id, chunk_index)` and index on run/status |
+| `implementation_observations` | Integer `observation_id` primary key, domain `provenance_id`, run/chunk FKs, 1-based observation index, every Stage 1 semantic/document/chunk field, actors/context/response JSON arrays, evidence summary, validation status, original model output JSON, self-FK `duplicate_of_observation_id`; unique `(chunk_id, observation_index)` and indexes for clean queries |
+| `evidence_spans` | Integer primary key, observation FK, 1-based `span_index`, verbatim quote, physical page, optional evidence date, role; unique `(observation_id, span_index)` and indexed observation FK |
 
-Both names use the same run ID. An exclusively created transient `.reserve` file
-claims the pair until final reporting; a collision with an active reservation or
-existing artifact causes another ID to be tried. Writers refuse existing files.
-JSONL and report each use a same-directory `.part` file, close, then atomic
-replacement to the reserved new destination. No placeholder final JSONL, incremental
-append, latest alias, symlink, or overwrite of an earlier run is created.
+All operational timestamps use ISO 8601 with an explicit `+00:00` UTC offset;
+document/evidence dates use SQL date columns. Status constraints prevent invalid
+run/chunk/validation vocabularies.
 
-| Status | Meaning | Normal JSONL |
-| --- | --- | --- |
-| `completed` | Every intended chunk returned usable structured output and document publication succeeded | Written, possibly empty |
-| `partial` | At least one chunk succeeded and at least one chunk failed | Not written |
-| `failed` | No chunks succeeded, or document preparation/orchestration/publication failed | Not written |
+A run’s `status` is NULL until finalized and `finished_at` is also NULL. This keeps
+an interrupted attempt distinguishable from a finalized failure without introducing
+a fourth final status. All intended chunks are registered in one transaction before
+model setup/calls, so setup failures leave inspectable pending chunks. A PDF failure
+can leave a run with no chunks.
 
-Repairs/rejections are a separate quality dimension. Any number of warnings can
-coexist with `completed`; duplicate removal is a count, not a warning or status.
-A schema-valid chunk returning zero observations, or only rejected observations,
-still counts as successful coverage. Whole-response/provider/prompt failures are
-recorded in `chunk_failures`, not observation warnings. No partial JSONL is published
-or saved for resume. Validated results of successful chunks are transient on a partial run.
-
-The CLI attempts a report even after a PDF, setup, or persistence failure. If it
-cannot reserve/write artifacts, it says no report was written. If JSONL publication
-succeeds but report/display handling fails, extraction remains completed; that
-operational problem is separately reported and causes a nonzero exit code.
-Report/display errors never retroactively label a published extraction as failed.
-Normally, completed runs exit 0; partial/failed runs exit 1. Other selected documents
-continue after a failure. Interrupts and process termination are not a durable-run system.
-
-## Run report schema
-
-`RunReport` in `extraction/models.py` is the typed operational artifact, separate
-from scientific observations. Its fields are:
+For each chunk, a short transaction marks it running. Extraction and deterministic
+validation then occur outside any database session. The successful chunk transaction
+is exactly:
 
 ```text
-document_id: str
-run_id: str
-started_at: datetime (UTC)
-finished_at: datetime | null
-status: completed | partial | failed
-schema_version: "stage1-v3"
-model: str | null
-chunks_total: int
-chunks_succeeded: int
-chunks_failed: int
-observations_returned: int
-observations_valid: int
-observations_repaired: int
-observations_rejected: int
-duplicates_removed: int
-observations_persisted: int
-input_tokens: int | null
-output_tokens: int | null
-jsonl_file: str | null
-warnings: list[ValidationWarning]
-chunk_failures: list[ChunkFailure]
-error: str | null
+BEGIN
+  update chunk: completed, finished_at, tokens, warnings
+  insert every observation (valid, repaired, rejected)
+  insert each observation’s ordered evidence spans
+COMMIT
 ```
 
-Warnings contain `code`, `message`, nullable `chunk_start_page`, `chunk_end_page`,
-`observation_index`, `evidence_span_index`, and `action`. Rejection codes include
-`ungrounded_quote`, `invalid_evidence_page`, and `observation_rejected`.
-Chunk failures contain `chunk_index`, `chunk_start_page`, `chunk_end_page`,
-`error_type`, and `message`. A document-level failure is described in `error`.
-Preparation/setup failures may prevent any chunk attempts even if the total is known.
+An insert failure rolls back the entire chunk, including the completed transition
+and usage. A whole-chunk provider/schema failure instead commits `failed`, its
+error/type, and finish time. It does not erase earlier chunk commits. A database
+write failure aborts further model calls; earlier successful chunks remain stored,
+and unfinished chunks stay running/pending for inspection and future retry work.
 
-Returned/valid/repaired/rejected counts describe schema-valid successful chunks
-before deduplication. `returned = valid + repaired + rejected`; for completed runs,
-`persisted = valid + repaired - duplicates_removed`. Partial/failed runs always
-record zero persisted and `jsonl_file=null`. Model is the configured adapter model,
-or null if configuration never became available.
+After chunk attempts, `mark_duplicates(run_id)` applies the same exact-evidence
+signature rule as before and is safe to rerun, including on partial runs. Rejected
+rows do not participate. Finalization derives coverage from all registered chunks:
 
-The adapter exposes optional last-call usage through the existing generic service;
-generation still returns its original typed Pydantic response. The sequential feature
-reads metadata immediately after a successful call. Token totals aggregate successful
-chunks only, excluding failed calls. Each total is null if any successful call lacks
-that count, or no calls succeeded; it is never an invented zero or misleading partial sum.
-Costs are not calculated. `finished_at` marks extraction/publication completion before
-the report itself is serialized. JSONL/report publication failures are best-effort
-operational diagnostics, not another run-status vocabulary.
+| Status | Meaning |
+| --- | --- |
+| `completed` | Every intended chunk produced usable structured output |
+| `partial` | At least one chunk completed and coverage is incomplete |
+| `failed` | No chunks completed, including preparation/setup failure |
+
+A schema-valid chunk returning zero observations or only rejected observations still
+counts as successful coverage, preserving the existing validator’s behavior.
+Warnings and operational errors are separate from coverage status. Unknown token
+counts remain NULL; a run total is NULL if any completed chunk lacks that count or
+there are no completed chunks. Failed call usage is not available through the
+existing adapter and is excluded.
+
+Crashes/cancellation leave finalization unfinished but preserve every already
+committed chunk. Full resume/retry CLI support is intentionally deferred.
+
+## Queries and summaries
+
+`ExtractionRepository.get_clean_observations(run_id)` reconstructs the existing
+Pydantic output with its original provenance IDs, metadata, summaries, and span
+order. It works on partial runs as well as completed ones. Its filter is:
+
+```sql
+SELECT * FROM implementation_observations
+WHERE run_id = :run_id
+  AND validation_status IN ('valid', 'repaired')
+  AND duplicate_of_observation_id IS NULL;
+```
+
+All raw rows, including rejected observations and duplicates, remain queryable.
+Evidence can be inspected directly:
+
+```sql
+SELECT o.observation_id, o.validation_status, e.span_index,
+       e.quote, e.page, e.evidence_date, e.role
+FROM implementation_observations AS o
+JOIN evidence_spans AS e ON e.observation_id = o.observation_id
+WHERE o.run_id = :run_id
+ORDER BY o.chunk_id, o.observation_index, e.span_index;
+```
+
+`get_run_summary` builds the existing `RunReport` from persisted run/chunk/observation
+state. The CLI prints status, run ID, chunk counts, observations returned and clean,
+valid/repaired/rejected counts, duplicate count, warnings, tokens, model, schema,
+concurrency, and elapsed time. `observations_returned = valid + repaired + rejected`.
+The compatibility fields `duplicates_removed` and `observations_persisted` now mean
+**duplicates marked** and **clean observations stored**, respectively. The latter is
+`valid + repaired - duplicates_marked`, including for partial runs. All returned
+observations are stored regardless of that clean count. `max_concurrency=1` is also
+included in the report.
+
+## Optional file exports
+
+SQLite is canonical. By default each invocation still attempts immutable timestamp/
+UUID JSONL/report exports for compatibility. Both use the database run ID:
+
+```text
+KM_ISR07_2023__<run_id>.jsonl
+KM_ISR07_2023__<run_id>.report.json
+```
+
+JSONL is exported only for completed coverage and contains clean observations,
+possibly none. Reports can describe completed, partial, or failed attempts. No file
+is needed to retain partial results. `--no-export` skips both files and reservations.
+Existing files are never overwritten or used to skip extraction. Legacy pilot
+files remain untouched and are not imported into SQLite.
+
+File writes retain the existing reservation and atomic `.part`-then-replace helpers.
+Failure to reserve/write files or display a summary produces an operational diagnostic
+and a nonzero CLI exit, while the persisted extraction status stays based on chunk
+coverage. Normally completed runs exit 0; partial/failed runs exit 1. Dry-run needs
+no model configuration and creates neither database nor exports.
 
 ## Evidence-bundle pilot rerun
 
@@ -373,8 +428,9 @@ once; process environment variables take precedence. A normal invocation is live
 uv run extract-observations --document KM_ISR07_2023
 ```
 
-This processes both chunks of that single ISR and creates a new timestamped report.
-On completed coverage, its result is:
+This processes both chunks of that single ISR, persists them immediately in
+`data/derived/stage1.sqlite`, and creates a new run. On completed coverage, the
+default compatibility exports are:
 
 ```text
 data/derived/extracted/comoros/KM_ISR07_2023__<run_id>.jsonl
@@ -385,6 +441,7 @@ Run the same command again to create another independent attempt. Use
 `--max-chars 8000` to adjust the soft chunk target. Existing pilot JSONL files are
 not migrated or rewritten; their existence never skips a new invocation.
 New observations use evidence bundles; top-level single-quote/page/date fields are removed.
+Add `--no-export` to keep the attempt entirely in SQLite.
 `--root /path/to/repo` supports execution from another
 directory.
 `--country comoros` and `--all` are explicit batch options for later use; dry-run
@@ -408,6 +465,16 @@ partial/failed reports without JSONL, usage aggregation, immutable reruns and co
 atomic failure cleanup, report/display error isolation, JSONL bundle round trips,
 holdout/traversal/symlink rejection, explicit selection, credential-free dry-run,
 empty successful output, and preservation of earlier runs.
+
+SQLite tests use temporary databases only. They cover idempotent initialization,
+required tables and pragmas, uniqueness/FK constraints, full-field round trips,
+ordered multi-span evidence, usage, validation/audit states, original unsupported
+dates versus repaired NULL dates, rejected empty evidence, retained overlap duplicates,
+rerunnable duplicate marking, coverage status derivation, atomic rollback on an
+actual evidence-insert failure, independent-connection visibility before the next
+model call, two committed chunks surviving a third failure, cancellation preserving
+unfinished state, export reservation failures, and stopping further paid calls on a
+database failure. The entire suite uses fakes and makes no paid model calls.
 
 The hierarchy remains source document → exact evidence spans → atomic observation →
 factor description. Embeddings, clusters, canonical titles, and cross-case lessons

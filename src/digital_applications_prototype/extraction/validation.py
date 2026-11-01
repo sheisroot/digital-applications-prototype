@@ -116,8 +116,20 @@ def deduplicate_observations(
     Span order, harmless whitespace, and generated paraphrases do not affect the
     signature. Different observation types, pages, roles, or quotes remain separate.
     """
-    unique = {}
-    for item in observations:
+    duplicates = observation_duplicate_indexes(observations)
+    return [item for index, item in enumerate(observations) if index not in duplicates]
+
+
+def observation_duplicate_indexes(
+    observations: list[ImplementationObservation],
+) -> dict[int, int]:
+    """Map each duplicate's list index to its first occurrence, without deleting it."""
+    first = {}
+    duplicates = {}
+    for index, item in enumerate(observations):
         key = observation_signature(item.document_id, item)
-        unique.setdefault(key, item)
-    return list(unique.values())
+        if key in first:
+            duplicates[index] = first[key]
+        else:
+            first[key] = index
+    return duplicates

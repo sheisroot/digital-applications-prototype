@@ -106,17 +106,26 @@ uv run extract-observations --document KM_ISR07_2023 --dry-run
 # Normal live extraction using the configured model
 uv run extract-observations --document KM_ISR07_2023
 
-# Another live run creates new artifacts and preserves the earlier run
+# Another live run creates an independent persisted attempt
 uv run extract-observations --document KM_ISR07_2023
+
+# SQLite only, without JSONL/report exports
+uv run extract-observations --document KM_ISR07_2023 --no-export
 ```
 
 Live execution is the default for an explicit `--document`, `--country`, or `--all`
-selection. Every live document attempt gets an immutable UTC timestamp/UUID run ID
-and a `.report.json` where the output location is writable. Only fully covered
-`completed` runs produce a paired downstream-ready JSONL. `partial` means some
-chunks failed; `failed` means no chunks succeeded or document publication failed.
-Warnings are separate metadata: a completed run can contain repairs and rejected
-observations. Previous artifacts are never overwritten or used to skip a new run.
+selection. SQLite at `data/derived/stage1.sqlite` is the canonical extraction record;
+startup creates its directory and schema automatically. Every live document attempt
+gets a new UTC timestamp/UUID run ID. Each successful chunk commits all observations
+(including rejected ones), ordered evidence spans, warnings, and token usage before
+the next model call. Later failures or interruption preserve earlier committed work.
 
-See [Stage 1 documentation](docs/stage1.md) for the file tree, execution flow,
-validation rules, run reports, and one-document pilot commands.
+Final status follows chunk coverage: `completed` for all chunks, `partial` for some,
+and `failed` for none. Warnings remain separate. Overlap duplicates stay stored with
+a pointer to their first occurrence. Clean queries return valid/repaired nonduplicates.
+JSONL and `.report.json` remain best-effort compatibility exports; `--no-export`
+disables both. Export failures leave database state and extraction status intact.
+Previous attempts are never overwritten or used to skip a new run.
+
+See [Stage 1 documentation](docs/stage1.md) for the schema, lifecycle, query examples,
+validation rules, and one-document pilot commands.

@@ -566,7 +566,7 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([f.error_type for f in report.chunk_failures], ['RuntimeError', 'ValidationError'])
             self.assertEqual((report.input_tokens, report.output_tokens), (30, 60))
             self.assertIsNone(report.jsonl_file)
-            self.assertEqual(report.observations_persisted, 0)
+            self.assertEqual(report.observations_persisted, 1)
             self.assertFalse(run_jsonls(root))
             self.assertEqual(len(adapter.calls), 3)
 
@@ -606,7 +606,7 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
                 report = read_reports(root)[0]
                 self.assertEqual((report.input_tokens, report.output_tokens), expected)
 
-    async def test_jsonl_failure_produces_failed_report_and_next_document_continues(self):
+    async def test_jsonl_failure_preserves_completed_run_and_next_document_continues(self):
         with TemporaryDirectory() as directory, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
             root = Path(directory)
             missing = select_documents(document='MX_ISR05_2014')[0]
@@ -616,9 +616,10 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
             with patch('digital_applications_prototype.extraction.cli.write_observations', side_effect=OSError('disk full')):
                 self.assertEqual(await run_documents(root, [DOCUMENT], extractor=extractor()), 1)
             report = read_reports(root)[-1]
-            self.assertEqual(report.status, RunStatus.FAILED)
+            self.assertEqual(report.status, RunStatus.COMPLETED)
             self.assertIsNone(report.jsonl_file)
-            self.assertIn('disk full', report.error)
+            self.assertIsNone(report.error)
+            self.assertEqual(report.observations_persisted, 1)
             self.assertEqual(len(run_jsonls(root)), 1)
 
     async def test_report_failure_does_not_relabel_published_extraction(self):

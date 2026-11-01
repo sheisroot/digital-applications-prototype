@@ -161,8 +161,16 @@ class ObservationValidationResult(BaseModel):
         return self
 
 
+class AuditedObservation(BaseModel):
+    """Keep the original model output alongside the deterministic validation outcome."""
+
+    model_observation: ModelObservation
+    validation: ObservationValidationResult
+
+
 class ChunkExtractionResult(BaseModel):
     observations: list[ImplementationObservation] = Field(default_factory=list)
+    observation_results: list[AuditedObservation] = Field(default_factory=list)
     observations_returned: int = 0
     observations_valid: int = 0
     observations_repaired: int = 0
@@ -193,6 +201,7 @@ class RunReport(BaseModel):
     status: RunStatus = RunStatus.FAILED
     schema_version: Literal["stage1-v3"] = "stage1-v3"
     model: str | None = None
+    max_concurrency: int = 1
     chunks_total: int = 0
     chunks_succeeded: int = 0
     chunks_failed: int = 0

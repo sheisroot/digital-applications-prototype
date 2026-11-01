@@ -1,4 +1,4 @@
-# Data folder to ignore
+# Local data, including stage1.sqlite and SQLite WAL/SHM sidecars
 data/
 
 # Local environment variants; keep the example template

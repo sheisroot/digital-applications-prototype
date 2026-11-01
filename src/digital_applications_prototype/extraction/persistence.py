@@ -1,4 +1,4 @@
-"""Immutable run destinations and atomic whole-file publication."""
+"""Optional immutable file exports; SQLite owns extraction state."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,7 +20,8 @@ class RunArtifacts:
         self.reservation_path.unlink(missing_ok=True)
 
 
-def reserve_run(root: Path, document: DocumentEntry, started_at: datetime) -> RunArtifacts:
+def reserve_run(root: Path, document: DocumentEntry, started_at: datetime, *,
+                run_id: str | None = None) -> RunArtifacts:
     """Reserve a unique timestamp/UUID artifact pair without touching earlier runs.
 
     An exclusive transient reservation prevents concurrent attempts from claiming
@@ -33,20 +34,24 @@ def reserve_run(root: Path, document: DocumentEntry, started_at: datetime) -> Ru
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = started_at.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     for _ in range(10):
-        run_id = f"{timestamp}_{uuid4().hex[:12]}"
-        stem = f"{document.document_id}__{run_id}"
+        candidate = run_id or f"{timestamp}_{uuid4().hex[:12]}"
+        stem = f"{document.document_id}__{candidate}"
         reservation = directory / f".{stem}.reserve"
         try:
             with reservation.open("x", encoding="utf-8"):
                 pass
         except FileExistsError:
+            if run_id is not None:
+                raise
             continue
         jsonl = directory / f"{stem}.jsonl"
         report = directory / f"{stem}.report.json"
         if any(path.exists() or path.is_symlink() for path in (jsonl, report)):
             reservation.unlink()
+            if run_id is not None:
+                raise FileExistsError(f"Export already exists for run {run_id}")
             continue
-        return RunArtifacts(run_id, jsonl, report, reservation)
+        return RunArtifacts(candidate, jsonl, report, reservation)
     raise FileExistsError("Could not reserve a distinct extraction run ID")
 
 
