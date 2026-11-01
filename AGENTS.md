@@ -27,3 +27,13 @@ feat(notebooks): add project case comparison
 When I request a commit and push, proceed without additional confirmation to `https://github.com/sheisroot/digital-applications-prototype.git`.
 The existing author email in project metadata is approved for publication there.
 Use normal pushes; ask before force-pushing or deleting remote branches.
+
+## Implementation and validation
+
+Before making changes, inspect the relevant code and follow the existing project structure and configuration. Keep changes focused on the requested work.
+
+For Python changes, run the configured Ruff lint and format checks, Pyright, and relevant tests. Use the project’s `uv` environment and the commands documented in `pyproject.toml` or the README.
+
+Fix issues introduced by the change. If a check reports pre-existing issues outside the change, report them separately; don’t hide them with ignores or claim the check passed.
+
+At the end, summarize the changes and list the validation commands run and their results. If a check could not be run, say why.
