@@ -62,10 +62,13 @@ def render_card(
     selected: bool = False,
     score: float | None = None,
 ) -> None:
-    """Use the same mechanism-first presentation for browsing and related results."""
+    """Demo-only presentation labels. Not canonical taxonomy categories."""
     prefix = "browse" if browsing else "related"
     st.button(
-        observation.factor_description,
+        observation.display_title,
+        help="Short display label generated for this demo."
+        if observation.factor_label
+        else None,
         key=f"{prefix}_{observation.observation_id}",
         type="secondary" if selected else "tertiary",
         width="stretch",
@@ -73,6 +76,8 @@ def render_card(
         on_click=select_browse_observation if browsing else open_observation,
         args=(observation.observation_id,),
     )
+    if observation.factor_label:
+        st.write(observation.factor_description)
     metadata = (
         f"{humanize(observation.country)} · "
         f"{humanize(observation.observation_type)} · {humanize(observation.claim_scope)}"

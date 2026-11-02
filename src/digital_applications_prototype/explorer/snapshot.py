@@ -47,6 +47,7 @@ CREATE TABLE observations (
     run_id TEXT NOT NULL REFERENCES selected_runs(run_id),
     document_id TEXT NOT NULL REFERENCES documents(document_id),
     observation TEXT NOT NULL, factor_description TEXT NOT NULL,
+    factor_label TEXT, -- Demo-only presentation labels. Not canonical taxonomy categories.
     observation_type TEXT NOT NULL, valence TEXT NOT NULL, claim_scope TEXT NOT NULL,
     implementation_area TEXT, actors_json TEXT NOT NULL,
     condition_or_context_json TEXT NOT NULL, action_or_response_json TEXT NOT NULL,

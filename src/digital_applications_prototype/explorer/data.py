@@ -16,7 +16,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 MODEL = "text-embedding-3-large"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FILTER_FIELDS = (
     "country",
     "project_id",
@@ -75,6 +75,12 @@ class Observation:
     document_date: str | None
     source_url: str | None
     evidence: tuple[Evidence, ...]
+    factor_label: str | None = None
+
+    @property
+    def display_title(self) -> str:
+        """Demo-only presentation label; never a semantic retrieval input."""
+        return self.factor_label or self.factor_description
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,7 @@ def load_corpus(path: Path) -> Corpus:
                 run_id=row["run_id"],
                 observation=row["observation"],
                 factor_description=row["factor_description"],
+                factor_label=row["factor_label"],
                 observation_type=row["observation_type"],
                 valence=row["valence"],
                 claim_scope=row["claim_scope"],

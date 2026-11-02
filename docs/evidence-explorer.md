@@ -28,8 +28,9 @@ does not need to install the pipeline package.
 
 Search comes first, followed by Country, Observation type, and Claim scope.
 Project, Document, Document type, and Valence remain in the collapsed **Advanced
-filters** section. Results use exact factor descriptions as selectable mechanism
-text, with compact country/type/scope metadata. The desktop layout gives results
+filters** section. Results use short demo display labels as selectable titles, with the full factor
+description underneath and compact country/type/scope metadata. Missing labels
+fall back to the full description. The desktop layout gives results
 44% of the two-pane content area; narrow screens stack the panes. A borderless
 scroll area keeps the results list bounded. Selected cases show the observation,
 mechanism, compact scope badges, and supporting evidence together. Structured and
@@ -45,7 +46,7 @@ technical details remain collapsed.
 | Supporting evidence spans | 1,187 |
 | Current factor-description vectors | 1,093 |
 | Dimensions per vector | 3,072 |
-| SQLite file size | 28,479,488 bytes (27.16 MiB) |
+| SQLite file size | See `demo/evidence.json` (includes demo label audit) |
 
 `demo/selected_runs.txt` is an exact copy of the intentionally selected local
 `experiments/mini_corpus_v1_runs.txt`, rather than an inferred latest-run selection.
@@ -136,7 +137,7 @@ Keep the keyword and country filter while opening related observations; they rem
 return to the search selection. Below the supporting evidence, set **Search within
 → Other countries**, then click **Find related observations**. The same control
 also offers Full corpus, Other documents, and Other documents and countries,
-preserving both restrictions together. Related results use the same mechanism-first
+preserving both restrictions together. Related results use the same label/description/metadata
 presentation as browsing results.
 
 | Seed | Grounded evidence | Top cross-country result | Cosine |
@@ -189,3 +190,53 @@ adjudicated. Existing quote-location/spacing limitations are documented in
 Source availability and PDF-viewer page-fragment behavior depend on the World Bank
 host. Cloud deployment and anonymous access must still be verified in the user's
 Streamlit account; this task prepares the deployment without publishing it.
+
+## Temporary demo factor labels
+
+**Demo-only presentation labels. Not canonical taxonomy categories.** The nullable
+`observations.factor_label` exists only in the frozen demo snapshot (schema v2).
+The snapshot exporter creates this empty column; it does not copy labels into or
+from Stage 1. Rebuilding the snapshot requires regenerating its presentation labels.
+The extraction schema, extraction prompt, canonical database, factor descriptions,
+and original embedding values remain unchanged.
+
+The optional generation command uses the existing structured LLM service and the
+configured `LLM_MODEL`/`OPENAI_API_KEY`. Only an integer observation ID and that
+observation's `factor_description` enter each request. Requests are independent,
+with up to eight in flight; no metadata, neighboring descriptions, quotes, or
+embeddings enter generation. No web lookup is performed. SDK retries are disabled
+so audit attempts correspond to API request attempts, including connection failures.
+
+```sh
+uv run python -m scripts.generate_demo_factor_labels --sample
+# Inspect all 30 printed pairs for fidelity, specificity, and noun-phrase style.
+# Then run the remaining observations:
+uv run python -m scripts.generate_demo_factor_labels
+# Inspect statistics without invoking the provider:
+uv run python -m scripts.generate_demo_factor_labels --report-only
+```
+
+The sample is selected offline by round-robin across country/type/scope strata.
+Selection metadata never enters model requests. Each successful label is committed
+immediately. Rerunning skips populated labels; failures retain null labels and are
+retried on the next run. There is deliberately no overwrite mode. The small
+`demo_factor_label_audit` table records per-observation attempts, model, prompt
+version, description hash, status, error, timestamps, and available token usage.
+Interrupted requests remain `started` in the audit and their unlabeled observations
+are eligible for retry. The JSON quality report records exact duplicate labels
+without merging or normalizing them. Currency cost is not supplied by this API.
+`demo/evidence.json` is refreshed to describe the updated frozen artifact.
+
+Browsing and related cards show label, full factor description, then metadata.
+A title tooltip explains the demo label. The selected pane retains the exact
+observation, full factor description, evidence, metadata, and related results.
+Literal search and cosine similarity keep their existing inputs; labels never
+enter embeddings, similarity ranking, grouping, or deduplication.
+
+Focused generation and fallback tests:
+
+```sh
+uv run python -m unittest discover -s tests -p 'test_demo_factor_labels.py' -v
+```
+
+Current generation status and validation: [demo factor-label report](demo-factor-labels-report.md).

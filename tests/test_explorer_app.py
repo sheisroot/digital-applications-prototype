@@ -23,6 +23,32 @@ class ExplorerAppTests(unittest.TestCase):
         self.assertFalse(list(self.app.exception))
         self.assertEqual(sha256(self.snapshot.read_bytes()).hexdigest(), self.digest)
 
+    def test_demo_label_and_null_fallback_card_hierarchy(self):
+        app = AppTest.from_string(
+            f"""
+import runpy
+from dataclasses import replace
+namespace = runpy.run_path({str(Path("apps/evidence_explorer/app.py").resolve())!r})
+corpus = namespace["cached_corpus"]()
+labeled = replace(corpus.observations[0], factor_label="Demo mechanism label")
+fallback = replace(corpus.observations[1], factor_label=None)
+namespace["render_card"](labeled, browsing=True)
+namespace["render_card"](fallback, score=0.75)
+""",
+            default_timeout=20,
+        ).run()
+        self.assertFalse(list(app.exception))
+        corpus = load_corpus(self.snapshot)
+        self.assertEqual(app.button[0].label, "Demo mechanism label")
+        self.assertEqual(app.button[1].label, corpus.observations[1].factor_description)
+        self.assertTrue(
+            any(
+                m.value == corpus.observations[0].factor_description
+                for m in app.markdown
+            )
+        )
+        self.assertTrue(any("Similarity 0.750" in c.value for c in app.caption))
+
     def test_rehearsed_capacity_flow_and_independent_evidence(self):
         app = self.app
         self.assertTrue(
@@ -88,7 +114,7 @@ class ExplorerAppTests(unittest.TestCase):
         ):
             app.multiselect(key=f"filter_{field}").select(value).run()
         app.button(key="browse_1157").click().run()
-        self.assertEqual(app.button(key="browse_1157").label, seed.factor_description)
+        self.assertEqual(app.button(key="browse_1157").label, seed.display_title)
         for scope in (
             "Full corpus",
             "Other documents",
@@ -106,7 +132,7 @@ class ExplorerAppTests(unittest.TestCase):
                     candidate = corpus.get(
                         int(str(button.key).removeprefix("related_"))
                     )
-                    self.assertEqual(button.label, candidate.factor_description)
+                    self.assertEqual(button.label, candidate.display_title)
                     self.assertNotEqual(candidate.observation_id, seed.observation_id)
                     if scope in {"Other documents", "Other documents and countries"}:
                         self.assertNotEqual(candidate.document_id, seed.document_id)

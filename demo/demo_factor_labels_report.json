@@ -1,0 +1,35 @@
+{
+  "total_observations": 1093,
+  "labels": 1093,
+  "nulls": 0,
+  "unique_labels": 1092,
+  "duplicate_exact_labels": {
+    "Three-stage geographic, community, and proxy-means targeting": 2
+  },
+  "duplicate_label_groups": 1,
+  "duplicate_excess_observations": 1,
+  "mean_words": 5.600182982616651,
+  "median_words": 6,
+  "longer_than_8_words": [
+    778,
+    870,
+    1108,
+    1212,
+    1250,
+    1464,
+    1764,
+    1769
+  ],
+  "shorter_than_2_words": [],
+  "requests": 1124,
+  "attempts_by_status": {
+    "failed": 30,
+    "success": 1094
+  },
+  "input_tokens": 241006,
+  "output_tokens": 167194,
+  "models": [
+    "gpt-6-luna"
+  ],
+  "prompt_version": "demo-display-v1"
+}
