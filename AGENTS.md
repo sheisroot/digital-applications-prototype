@@ -30,10 +30,30 @@ Use normal pushes; ask before force-pushing or deleting remote branches.
 
 ## Implementation and validation
 
-Before making changes, inspect the relevant code and follow the existing project structure and configuration. Keep changes focused on the requested work.
+Before making changes, inspect the relevant code and follow the
+existing project structure and configuration.
 
-For Python changes, run the configured Ruff lint and format checks, Pyright, and relevant tests. Use the project’s `uv` environment and the commands documented in `pyproject.toml` or the README.
+Use the project's uv environment. After Python changes, run:
+- uv run ruff check .
+- uv run ruff format --check .
+- uv run pyright
+- Relevant tests for the changed behavior
 
-Fix issues introduced by the change. If a check reports pre-existing issues outside the change, report them separately; don’t hide them with ignores or claim the check passed.
+These commands must use the repository's checked-in configuration.
+If the repository documents different canonical commands, use those.
 
-At the end, summarize the changes and list the validation commands run and their results. If a check could not be run, say why.
+Resolve Ruff and Pyright errors in files you change, including
+pre-existing errors. Re-run checks after fixes until they pass.
+
+Do not suppress diagnostics, weaken checking rules, exclude files,
+or replace useful types with Any merely to make checks pass.
+Use suppressions only when technically justified, and explain them.
+
+For repository-wide cleanup tasks, resolve all diagnostics within
+the configured checking scope, including pre-existing diagnostics.
+Continue fixing and re-running checks until they pass or a concrete
+blocker requires user input.
+
+At completion, report the commands run and their results. Identify
+remaining failures and blockers explicitly. Do not describe work
+as fully validated when required checks are failing.

@@ -8,7 +8,11 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 class PromptRenderer:
     def __init__(self, prompts_dir: str | Path | None = None) -> None:
-        directory = prompts_dir if prompts_dir is not None else Path(__file__).parent / "prompts"
+        directory = (
+            prompts_dir
+            if prompts_dir is not None
+            else Path(__file__).parent / "prompts"
+        )
         self.environment = Environment(
             loader=FileSystemLoader(directory),
             undefined=StrictUndefined,

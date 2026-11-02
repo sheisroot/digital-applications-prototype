@@ -132,7 +132,9 @@ class ImplementationObservation(ModelObservation, DocumentMetadata):
     @model_validator(mode="after")
     def require_evidence(self) -> "ImplementationObservation":
         if not self.evidence.spans:
-            raise ValueError("Persisted observations require at least one evidence span")
+            raise ValueError(
+                "Persisted observations require at least one evidence span"
+            )
         return self
 
 

@@ -1,10 +1,17 @@
 """Deterministic page-boundary chunks with bounded trailing context."""
 
+import itertools
+
 from .models import DocumentChunk, DocumentEntry, DocumentMetadata, PageText
 
 
-def chunk_pages(document: DocumentEntry, pages: list[PageText], *,
-                max_chars: int = 12000, overlap_chars: int = 600) -> list[DocumentChunk]:
+def chunk_pages(
+    document: DocumentEntry,
+    pages: list[PageText],
+    *,
+    max_chars: int = 12000,
+    overlap_chars: int = 600,
+) -> list[DocumentChunk]:
     """Group consecutive pages under a soft character target without splitting pages.
 
     Oversized pages form their own chunks; chunks containing only whitespace
@@ -34,7 +41,7 @@ def chunk_pages(document: DocumentEntry, pages: list[PageText], *,
     if current and any(p.text.strip() for p in current):
         chunks.append(DocumentChunk(**metadata, pages=current))
     if overlap_chars:
-        for previous, following in zip(chunks, chunks[1:]):
+        for previous, following in itertools.pairwise(chunks):
             last = next(page for page in reversed(previous.pages) if page.text.strip())
             start = max(0, len(last.text) - overlap_chars)
             # Preserve an exact source suffix while omitting an incomplete first word.

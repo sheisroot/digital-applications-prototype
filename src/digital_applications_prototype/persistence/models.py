@@ -14,7 +14,9 @@ class Base(DeclarativeBase):
 class ExtractionRun(Base):
     __tablename__ = "extraction_runs"
     __table_args__ = (
-        CheckConstraint("status IS NULL OR status IN ('completed', 'partial', 'failed')"),
+        CheckConstraint(
+            "status IS NULL OR status IN ('completed', 'partial', 'failed')"
+        ),
         CheckConstraint("max_concurrency > 0"),
     )
 
@@ -72,7 +74,9 @@ class ValidationRevision(Base):
     __tablename__ = "validation_revisions"
 
     revalidation_id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.run_id"), index=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("extraction_runs.run_id"), index=True
+    )
     validator_version: Mapped[str]
     revalidated_at: Mapped[str]
     source_json: Mapped[dict[str, Any]] = mapped_column(JSON)
@@ -85,14 +89,23 @@ class Observation(Base):
     __table_args__ = (
         UniqueConstraint("chunk_id", "observation_index"),
         CheckConstraint("validation_status IN ('valid', 'repaired', 'rejected')"),
-        Index("ix_observations_clean", "run_id", "validation_status", "duplicate_of_observation_id"),
+        Index(
+            "ix_observations_clean",
+            "run_id",
+            "validation_status",
+            "duplicate_of_observation_id",
+        ),
     )
 
     # Row identity differs from the domain ID, which intentionally matches duplicates.
     observation_id: Mapped[int] = mapped_column(primary_key=True)
     provenance_id: Mapped[str | None] = mapped_column(index=True)
-    run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.run_id"), index=True)
-    chunk_id: Mapped[int] = mapped_column(ForeignKey("extraction_chunks.chunk_id"), index=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("extraction_runs.run_id"), index=True
+    )
+    chunk_id: Mapped[int] = mapped_column(
+        ForeignKey("extraction_chunks.chunk_id"), index=True
+    )
     observation_index: Mapped[int]
     observation_type: Mapped[str]
     valence: Mapped[str]
@@ -108,7 +121,8 @@ class Observation(Base):
     evidence_summary: Mapped[str | None]
     validation_status: Mapped[str]
     duplicate_of_observation_id: Mapped[int | None] = mapped_column(
-        ForeignKey("implementation_observations.observation_id"), index=True,
+        ForeignKey("implementation_observations.observation_id"),
+        index=True,
     )
     project_id: Mapped[str]
     country: Mapped[str]
@@ -119,7 +133,9 @@ class Observation(Base):
     chunk_end_page: Mapped[int]
     raw_observation_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     evidence_spans: Mapped[list["EvidenceSpanRow"]] = relationship(
-        cascade="all, delete-orphan", order_by="EvidenceSpanRow.span_index", lazy="raise",
+        cascade="all, delete-orphan",
+        order_by="EvidenceSpanRow.span_index",
+        lazy="raise",
     )
 
 
@@ -129,7 +145,8 @@ class EvidenceSpanRow(Base):
 
     evidence_span_id: Mapped[int] = mapped_column(primary_key=True)
     observation_id: Mapped[int] = mapped_column(
-        ForeignKey("implementation_observations.observation_id"), index=True,
+        ForeignKey("implementation_observations.observation_id"),
+        index=True,
     )
     span_index: Mapped[int]
     quote: Mapped[str]

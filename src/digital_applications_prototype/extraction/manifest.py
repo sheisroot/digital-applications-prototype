@@ -6,10 +6,15 @@ from pathlib import Path
 from .models import DocumentEntry
 
 
-def _entry(country: str, project: str, doc: str, kind: str, when: str | None) -> DocumentEntry:
+def _entry(
+    country: str, project: str, doc: str, kind: str, when: str | None
+) -> DocumentEntry:
     return DocumentEntry(
         path=Path("data/input") / country / f"{doc}.pdf",
-        project_id=project, country=country, document_id=doc, document_type=kind,
+        project_id=project,
+        country=country,
+        document_id=doc,
+        document_type=kind,
         document_date=date.fromisoformat(when) if when else None,
     )
 
@@ -35,17 +40,25 @@ INPUT_DOCUMENTS = (
 )
 
 
-def select_documents(*, document: str | None = None, country: str | None = None,
-                     all_documents: bool = False) -> list[DocumentEntry]:
+def select_documents(
+    *,
+    document: str | None = None,
+    country: str | None = None,
+    all_documents: bool = False,
+) -> list[DocumentEntry]:
     """Select manifest entries in order using exactly one selection mode.
 
     Raise ValueError for ambiguous selections or selections with no matches.
     """
     if sum((document is not None, country is not None, all_documents)) != 1:
         raise ValueError("Select exactly one of --document, --country, or --all")
-    selected = [entry for entry in INPUT_DOCUMENTS if all_documents
-                or (document is not None and entry.document_id == document)
-                or (country is not None and entry.country == country)]
+    selected = [
+        entry
+        for entry in INPUT_DOCUMENTS
+        if all_documents
+        or (document is not None and entry.document_id == document)
+        or (country is not None and entry.country == country)
+    ]
     if not selected:
         raise ValueError("No input documents match the selection")
     return selected

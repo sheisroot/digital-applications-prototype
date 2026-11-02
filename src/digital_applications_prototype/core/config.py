@@ -7,7 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, SecretStr
 
-
 ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
@@ -27,6 +26,6 @@ class Settings(BaseModel):
         # No import-time environment reads, and no credentials in model reprs.
         _load_environment()
         return cls(
-            openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
+            openai_api_key=SecretStr(os.environ.get("OPENAI_API_KEY", "")),
             llm_model=os.environ.get("LLM_MODEL", ""),
         )

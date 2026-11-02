@@ -127,9 +127,11 @@ class EvidenceSpan(BaseModel):
     evidence_date: date | None = None
     role: EvidenceRole = EvidenceRole.SUPPORTS
 
+
 class EvidenceBundle(BaseModel):
     summary: str | None = None
     spans: list[EvidenceSpan]
+
 
 class ModelObservation(BaseModel):
     observation_type: ObservationType
@@ -144,6 +146,7 @@ class ModelObservation(BaseModel):
     observed_effect: str | None = None
     evidence_strength: EvidenceStrength
     evidence: EvidenceBundle
+
 
 class ExtractionResult(BaseModel):
     observations: list[ModelObservation] = Field(default_factory=list)

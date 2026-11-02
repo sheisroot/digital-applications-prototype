@@ -13,10 +13,16 @@ from digital_applications_prototype.llm.service import LLMService
 
 async def main() -> None:
     settings = Settings.from_env()
-    prompt = PromptRenderer().render("smoke.jinja2", text="This project separates prompts from providers.")
-    async with AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value()) as client:
+    prompt = PromptRenderer().render(
+        "smoke.jinja2", text="This project separates prompts from providers."
+    )
+    async with AsyncOpenAI(
+        api_key=settings.openai_api_key.get_secret_value()
+    ) as client:
         service = LLMService(OpenAIAdapter(client, model=settings.llm_model))
-        result = await service.generate_structured(prompt=prompt, response_model=SmokeTestResponse)
+        result = await service.generate_structured(
+            prompt=prompt, response_model=SmokeTestResponse
+        )
         print(result.model_dump_json(indent=2))
 
 

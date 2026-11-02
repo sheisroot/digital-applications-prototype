@@ -21,7 +21,9 @@ class Database:
             connect_args={"timeout": 30},
         )
         self.sessions = async_sessionmaker(
-            self.engine, expire_on_commit=False, class_=AsyncSession,
+            self.engine,
+            expire_on_commit=False,
+            class_=AsyncSession,
         )
 
         @event.listens_for(self.engine.sync_engine, "connect")
@@ -43,7 +45,9 @@ class Database:
         await self.engine.dispose()
 
 
-async def initialize_database(path: Path = Path("data/derived/stage1.sqlite")) -> Database:
+async def initialize_database(
+    path: Path = Path("data/derived/stage1.sqlite"),
+) -> Database:
     """Create the parent directory/schema and return an owned database handle."""
     database = Database(path)
     try:

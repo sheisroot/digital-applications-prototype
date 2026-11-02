@@ -66,6 +66,7 @@ from digital_applications_prototype.llm.prompt_renderer import PromptRenderer
 from digital_applications_prototype.llm.schemas.smoke import SmokeTestResponse
 from digital_applications_prototype.llm.service import LLMService
 
+
 class SummaryService:
     def __init__(self, renderer: PromptRenderer, llm: LLMService):
         self.renderer = renderer

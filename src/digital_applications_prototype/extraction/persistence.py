@@ -1,9 +1,9 @@
 """Optional immutable file exports; SQLite owns extraction state."""
 
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-import tempfile
 from uuid import uuid4
 
 from .models import DocumentEntry, ImplementationObservation, RunReport
@@ -20,8 +20,13 @@ class RunArtifacts:
         self.reservation_path.unlink(missing_ok=True)
 
 
-def reserve_run(root: Path, document: DocumentEntry, started_at: datetime, *,
-                run_id: str | None = None) -> RunArtifacts:
+def reserve_run(
+    root: Path,
+    document: DocumentEntry,
+    started_at: datetime,
+    *,
+    run_id: str | None = None,
+) -> RunArtifacts:
     """Reserve a unique timestamp/UUID artifact pair without touching earlier runs.
 
     An exclusive transient reservation prevents concurrent attempts from claiming
@@ -62,12 +67,15 @@ def _atomic_write(path: Path, text: str) -> None:
     cooperating writers of this artifact pair; no placeholder final file is used.
     """
     if path.resolve() != path or path.exists():
-        raise FileExistsError(f"Refusing to replace an existing or symlinked artifact: {path}")
+        raise FileExistsError(
+            f"Refusing to replace an existing or symlinked artifact: {path}"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         suffix=".part", delete=False) as target:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".part", delete=False
+        ) as target:
             temporary = Path(target.name)
             target.write(text)
         if path.exists() or path.is_symlink():
@@ -79,7 +87,9 @@ def _atomic_write(path: Path, text: str) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def write_observations(path: Path, observations: list[ImplementationObservation]) -> None:
+def write_observations(
+    path: Path, observations: list[ImplementationObservation]
+) -> None:
     """Atomically publish one completed run's JSONL, including an empty successful result."""
     _atomic_write(path, "".join(item.model_dump_json() + "\n" for item in observations))
 
