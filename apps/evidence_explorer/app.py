@@ -2,6 +2,9 @@
 
 import sqlite3
 import sys
+from collections.abc import Sequence
+from datetime import date
+from html import escape
 from pathlib import Path
 
 import streamlit as st
@@ -27,13 +30,30 @@ SCOPE_HELP = {
     "recommended": "A recommendation; not an observed implementation result.",
     "inferred": "An inferred claim; not an explicitly reported implementation result.",
 }
-SCOPE_COLORS = {
-    "actual": "green",
-    "planned": "blue",
-    "anticipated": "orange",
-    "recommended": "violet",
-    "inferred": "gray",
+# Restrained, accessible foreground/background pairs shared by all card/detail pills.
+PILL_COLORS = {
+    "condition": ("#455b70", "#eaf0f5"),
+    "action": ("#35645e", "#e8f2ee"),
+    "adaptation": ("#66527b", "#f0ebf5"),
+    "outcome": ("#785f39", "#f5efe3"),
+    "actual": ("#3c6347", "#eaf2e9"),
+    "planned": ("#455e86", "#eaf0f9"),
+    "anticipated": ("#805c35", "#f8efdf"),
+    "recommended": ("#73547a", "#f3ebf4"),
 }
+NEUTRAL_PILL = ("#555d66", "#eef0f2")
+DOCUMENT_TYPES = {
+    "PAD": "Project Appraisal Document",
+    "ISR": "Implementation Status and Results Report",
+    "AF": "Additional Financing",
+    "RESTRUCTURING": "Restructuring Paper",
+}
+SORT_OPTIONS = ("Most recent first", "Oldest first", "Document order")
+RELATED_SCOPES = (
+    "Anywhere in the corpus",
+    "Different documents",
+    "Different countries",
+)
 
 
 @st.cache_resource(show_spinner="Loading the frozen evidence corpus…")
@@ -55,6 +75,85 @@ def select_browse_observation(observation_id: int) -> None:
     open_observation(observation_id)
 
 
+def document_metadata(observation: Observation) -> str:
+    parts = [
+        DOCUMENT_TYPES.get(
+            observation.document_type, humanize(observation.document_type)
+        )
+    ]
+    if observation.document_date:
+        parsed = date.fromisoformat(observation.document_date)
+        parts.append(f"{parsed:%b} {parsed.day}, {parsed.year}")
+    else:
+        parts.append("Date unknown")
+    return " · ".join(parts)
+
+
+def document_label(observation: Observation) -> str:
+    return (
+        f"{humanize(observation.country)} · Project {observation.project_id} · "
+        f"{document_metadata(observation)}"
+    )
+
+
+def change_page(offset: int, pages: int) -> None:
+    st.session_state["results_page"] = max(
+        1, min(pages, int(st.session_state["results_page"]) + offset)
+    )
+
+
+def sort_observations(
+    observations: Sequence[Observation], mode: str = "Most recent first"
+) -> tuple[Observation, ...]:
+    """Presentation order only; never reorder the corpus/vector matrix itself."""
+
+    def key(observation: Observation) -> tuple[bool, int, str, int, int]:
+        ordinal = (
+            date.fromisoformat(observation.document_date).toordinal()
+            if observation.document_date
+            else 0
+        )
+        if mode == "Document order":
+            return (
+                False,
+                0,
+                observation.document_id,
+                min(s.page for s in observation.evidence),
+                observation.observation_id,
+            )
+        return (
+            not bool(ordinal),
+            -ordinal if mode == "Most recent first" else ordinal,
+            observation.document_id,
+            min(s.page for s in observation.evidence),
+            observation.observation_id,
+        )
+
+    return tuple(sorted(observations, key=key))
+
+
+def render_pills(observation: Observation) -> None:
+    pills = []
+    for value, colors in (
+        (observation.country, NEUTRAL_PILL),
+        (
+            observation.observation_type,
+            PILL_COLORS.get(observation.observation_type, NEUTRAL_PILL),
+        ),
+        (
+            observation.claim_scope,
+            PILL_COLORS.get(observation.claim_scope, NEUTRAL_PILL),
+        ),
+    ):
+        foreground, background = colors
+        title = SCOPE_HELP.get(value, "")
+        pills.append(
+            f'<span class="evidence-pill" style="color:{foreground};background:{background}" '
+            f'title="{escape(title, quote=True)}">{escape(humanize(value))}</span>'
+        )
+    st.html('<div class="evidence-pills">' + "".join(pills) + "</div>")
+
+
 def render_card(
     observation: Observation,
     *,
@@ -62,120 +161,111 @@ def render_card(
     selected: bool = False,
     score: float | None = None,
 ) -> None:
-    """Demo-only presentation labels. Not canonical taxonomy categories."""
+    """Native keyboard-accessible button expands across the entire compact card."""
     prefix = "browse" if browsing else "related"
-    st.button(
-        observation.display_title,
-        help="Short display label generated for this demo."
-        if observation.factor_label
-        else None,
-        key=f"{prefix}_{observation.observation_id}",
-        type="secondary" if selected else "tertiary",
-        width="stretch",
-        wrap=True,
-        on_click=select_browse_observation if browsing else open_observation,
-        args=(observation.observation_id,),
-    )
-    if observation.factor_label:
-        st.write(observation.factor_description)
-    metadata = (
-        f"{humanize(observation.country)} · "
-        f"{humanize(observation.observation_type)} · {humanize(observation.claim_scope)}"
-    )
-    if score is not None:
-        metadata += f" · Similarity {score:.3f}"
-    st.caption(metadata)
+    state = "selected" if selected else "idle"
+    with st.container(
+        key=f"result_card_{prefix}_{state}_{observation.observation_id}", gap="small"
+    ):
+        st.button(
+            observation.factor_label or "Unlabelled factor",
+            key=f"{prefix}_{observation.observation_id}",
+            type="tertiary",
+            width="stretch",
+            wrap=True,
+            on_click=select_browse_observation if browsing else open_observation,
+            args=(observation.observation_id,),
+        )
+        render_pills(observation)
+        if score is not None:
+            st.caption(f"Similarity {score:.3f}")
 
 
 def render_details(observation: Observation) -> None:
-    scope = observation.claim_scope
-    st.markdown(
-        f":gray-badge[{humanize(observation.observation_type)}] "
-        f":{SCOPE_COLORS[scope]}-badge[{humanize(scope)}] "
-        f":gray-badge[{humanize(observation.country)}]",
-        help=f"Claim scope: {humanize(scope)}. {SCOPE_HELP[scope]}",
-    )
-    st.subheader("Observation")
-    st.write(observation.observation)
-    st.markdown("**Factor / mechanism**")
-    st.write(observation.factor_description)
-    metadata = (
-        f"{humanize(observation.country)} · Project {observation.project_id} · "
-        f"{observation.document_id} · {observation.document_type}"
-    )
-    if observation.document_date:
-        metadata += f" · {observation.document_date}"
-    st.caption(metadata)
+    st.caption("FACTOR")
+    with st.container(key="selected_factor"):
+        st.write(observation.factor_description)
+    render_pills(observation)
+    st.caption(f"{humanize(observation.country)} · Project {observation.project_id}")
+    supporting, related = st.tabs(["Supporting evidence", "Related observations"])
+    with supporting:
+        for index, span in enumerate(observation.evidence):
+            with st.container(
+                key=f"evidence_card_{observation.observation_id}_{index}", gap="small"
+            ):
+                # Text preserves verbatim quotes and keeps source markup inert.
+                st.text(span.quote)
+                page_label = f"{document_metadata(observation)} · Page {span.page}"
+                if span.role != "supports":
+                    page_label += f" · {humanize(span.role)}"
+                st.caption(page_label)
+                if observation.source_url:
+                    st.link_button(
+                        "View source document",
+                        f"{observation.source_url}#page={span.page}",
+                    )
+        render_structured_details(observation)
+    with related:
+        render_related(observation)
+
+
+def render_structured_details(observation: Observation) -> None:
     with st.expander("Structured details", expanded=False):
         for label, values in (
+            (
+                "Observation",
+                (observation.observation,) if observation.observation else (),
+            ),
             ("Actors", observation.actors),
             ("Context", observation.context),
             ("Action / response", observation.action),
+            (
+                "Observed effect",
+                (observation.observed_effect,) if observation.observed_effect else (),
+            ),
+            (
+                "Implementation area",
+                (observation.implementation_area,)
+                if observation.implementation_area
+                else (),
+            ),
         ):
             if values:
                 st.markdown(f"**{label}**")
-                for value in values:
-                    st.write(value)
-        if observation.observed_effect:
-            st.markdown("**Observed effect**")
-            st.write(observation.observed_effect)
-        if observation.implementation_area:
-            st.markdown("**Implementation area (source extraction label)**")
-            st.write(observation.implementation_area)
-        st.caption(f"Valence: {humanize(observation.valence)}")
-
-    st.subheader("Supporting evidence")
-    for index, span in enumerate(observation.evidence):
-        if index:
-            st.divider()
-        # Text rendering preserves the exact quote and keeps source markup inert.
-        st.text(span.quote)
-        page_label = f"Physical PDF page {span.page}"
-        if span.role != "supports":
-            page_label += f" · {humanize(span.role)}"
-        st.caption(page_label)
-        if observation.source_url:
-            st.link_button(
-                "View source document", f"{observation.source_url}#page={span.page}"
-            )
-
-    st.divider()
-    render_related(observation)
-    with st.expander("Technical metadata", expanded=False):
-        st.caption(f"Observation ID: {observation.observation_id}")
-        st.caption(f"Provenance ID: {observation.provenance_id or 'Not recorded'}")
+                if len(values) > 1:
+                    st.html(
+                        "<ul>"
+                        + "".join(f"<li>{escape(value)}</li>" for value in values)
+                        + "</ul>"
+                    )
+                else:
+                    for value in values:
+                        st.write(value)
 
 
 def render_related(observation: Observation) -> None:
-    st.subheader("Related observations")
-    st.caption("Semantic similarity, not equivalence or corroboration.")
+    # Place results above controls once available, including after scope changes.
+    results = st.container(key="related_results")
     scope = st.selectbox(
-        "Search within",
-        (
-            "Full corpus",
-            "Other documents",
-            "Other countries",
-            "Other documents and countries",
-        ),
+        "Find related evidence in",
+        RELATED_SCOPES,
         key="related_scope",
-        help="Compares the corpus independently of browsing filters.",
+        help="Semantic similarity not equivalence or corroboration.",
     )
-    if st.button("Find related observations", key="find_related"):
+    if st.button("Search", key="find_related"):
         st.session_state["related_seed"] = observation.observation_id
     if st.session_state.get("related_seed") != observation.observation_id:
         return
     related = related_observations(
         cached_corpus(),
         observation.observation_id,
-        other_documents=scope in {"Other documents", "Other documents and countries"},
-        other_countries=scope in {"Other countries", "Other documents and countries"},
+        other_documents=scope == "Different documents",
+        other_countries=scope == "Different countries",
     )
-    if not related:
-        st.info("No related observations meet these constraints.")
-    with st.container(key="related_results"):
-        for index, (candidate, score) in enumerate(related):
-            if index:
-                st.divider()
+    with results:
+        if not related:
+            st.info("No related observations meet these constraints.")
+        for candidate, score in related:
             render_card(candidate, score=score)
 
 
@@ -207,7 +297,14 @@ def render_filters(corpus: Corpus) -> dict[str, list[str]]:
                     label,
                     sorted({str(getattr(o, field)) for o in corpus.observations}),
                     key=f"filter_{field}",
-                    format_func=humanize if field == "valence" else str,
+                    format_func=(
+                        {
+                            o.document_id: document_label(o)
+                            for o in corpus.observations
+                        }.__getitem__
+                        if field == "document_id"
+                        else (lambda value: DOCUMENT_TYPES.get(value, humanize(value)))
+                    ),
                 )
     return filters
 
@@ -218,13 +315,56 @@ def main() -> None:
     st.html("""
         <style>
         .stMainBlockContainer {max-width: 1480px; padding-top: 2rem;}
-        .st-key-browse_results button, .st-key-related_results button {
-            justify-content: flex-start; text-align: left; height: auto;
+        [class*="st-key-result_card_"] {
+            position: relative; padding: 0.7rem 0.8rem;
+            border: 1px solid #e5e7eb; border-radius: 8px;
         }
-        .st-key-browse_results button p, .st-key-related_results button p {
-            text-align: left; font-weight: 600; font-size: 1rem; line-height: 1.5;
+        [class*="st-key-result_card_"]:hover {background: #f5f7f9;}
+        [class*="st-key-result_card_browse_selected_"] {
+            background: #f0f4f7; border-color: #a9bac8;
         }
-        .st-key-browse_results hr, .st-key-related_results hr {margin: 0.5rem 0;}
+        [class*="st-key-result_card_"] div {position: static;}
+        [class*="st-key-result_card_"] button {
+            position: static; display: block; text-align: left;
+            padding: 0; height: auto; min-height: 0; border: 0;
+        }
+        [class*="st-key-result_card_"] button > div {
+            justify-content: flex-start; width: 100%;
+        }
+        [class*="st-key-result_card_"] button::after {
+            content: ""; position: absolute; inset: 0; z-index: 1;
+            border-radius: 8px;
+        }
+        [class*="st-key-result_card_"] button:focus-visible::after {
+            outline: 2px solid #54718b; outline-offset: 2px;
+        }
+        [class*="st-key-result_card_"] [data-testid="stMarkdownContainer"] {width: 100%;}
+        [class*="st-key-result_card_"] button p {
+            text-align: left; font-weight: 600; font-size: 1rem; line-height: 1.4;
+        }
+        .st-key-results_navigation [data-testid="stHorizontalBlock"] {flex-wrap: nowrap;}
+        .st-key-results_navigation [data-testid="stColumn"] {
+            min-width: 0; flex: 1 1 0;
+        }
+        .st-key-results_navigation [data-testid="stColumn"]:nth-child(2) {flex-grow: 2;}
+        .st-key-results_page button {display: none;}
+        .st-key-selected_factor p {font-size: 1.2rem; line-height: 1.55;}
+        .evidence-pills {display: flex; flex-wrap: wrap; gap: 0.3rem;}
+        .evidence-pill {
+            display: inline-block; border-radius: 12px; padding: 0.15rem 0.5rem;
+            font-size: 0.75rem; line-height: 1.4;
+        }
+        [class*="st-key-evidence_card_"] {
+            background: #fff9e9; color: #34322d; border: 1px solid #e9dfbd;
+            padding: 1rem; border-radius: 8px;
+        }
+        [class*="st-key-evidence_card_"] [data-testid="stText"] {
+            font-family: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+        }
+        @media (max-width: 640px) {
+            .stMainBlockContainer {padding: 3.5rem 1rem 1rem;}
+            .stMainBlockContainer h1 {font-size: 2rem;}
+        }
         </style>
     """)
     st.title("Evidence Explorer")
@@ -252,8 +392,23 @@ def main() -> None:
         label_visibility="collapsed",
     )
     filters = render_filters(corpus)
-    results = filter_observations(corpus.observations, keyword=keyword, filters=filters)
-    signature = (keyword, tuple((key, tuple(value)) for key, value in filters.items()))
+    browse, detail = st.columns([0.38, 0.62], gap="large")
+    with browse:
+        sort_mode = st.selectbox(
+            "Sort results",
+            SORT_OPTIONS,
+            key="browse_sort",
+            label_visibility="collapsed",
+        )
+    results = sort_observations(
+        filter_observations(corpus.observations, keyword=keyword, filters=filters),
+        sort_mode,
+    )
+    signature = (
+        keyword,
+        sort_mode,
+        tuple((key, tuple(value)) for key, value in filters.items()),
+    )
     if st.session_state.get("filter_signature") != signature:
         st.session_state["filter_signature"] = signature
         st.session_state["results_page"] = 1
@@ -261,30 +416,52 @@ def main() -> None:
     if not results:
         st.info("No observations match. Clear the keyword or adjust a metadata filter.")
         return
-    browse, detail = st.columns([0.44, 0.56], gap="large")
     with browse:
         pages = (len(results) + PAGE_SIZE - 1) // PAGE_SIZE
-        count_column, page_column = st.columns([3, 1], vertical_alignment="center")
-        with page_column:
-            page = int(
-                st.number_input(
-                    "Results page",
-                    min_value=1,
-                    max_value=pages,
-                    key="results_page",
-                    label_visibility="collapsed",
-                    help=f"Choose a page (1–{pages}).",
-                )
+        count_column, page_column = st.columns([1, 1], vertical_alignment="center")
+        with page_column, st.container(key="results_navigation"):
+            previous, page_input, following = st.columns(
+                [1, 2, 1], gap="small", vertical_alignment="center"
             )
+            current_page = int(st.session_state.get("results_page", 1))
+            with previous:
+                st.button(
+                    "←",
+                    key="previous_page",
+                    help="Previous page",
+                    width="stretch",
+                    disabled=current_page <= 1,
+                    on_click=change_page,
+                    args=(-1, pages),
+                )
+            with page_input:
+                page = int(
+                    st.number_input(
+                        "Results page",
+                        min_value=1,
+                        max_value=pages,
+                        key="results_page",
+                        label_visibility="collapsed",
+                        help=f"Choose a page (1–{pages}).",
+                    )
+                )
+            with following:
+                st.button(
+                    "→",
+                    key="next_page",
+                    help="Next page",
+                    width="stretch",
+                    disabled=current_page >= pages,
+                    on_click=change_page,
+                    args=(1, pages),
+                )
         count_column.caption(f"{len(results):,} results · Page {page} of {pages}")
         visible = results[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
         ids = [o.observation_id for o in visible]
         if st.session_state.get("browse_id") not in ids:
             select_browse_observation(ids[0])
         with st.container(height=740, border=False, key="browse_results"):
-            for index, observation in enumerate(visible):
-                if index:
-                    st.divider()
+            for observation in visible:
                 render_card(
                     observation,
                     browsing=True,

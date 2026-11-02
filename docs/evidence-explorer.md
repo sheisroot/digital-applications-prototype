@@ -28,13 +28,37 @@ does not need to install the pipeline package.
 
 Search comes first, followed by Country, Observation type, and Claim scope.
 Project, Document, Document type, and Valence remain in the collapsed **Advanced
-filters** section. Results use short demo display labels as selectable titles, with the full factor
-description underneath and compact country/type/scope metadata. Missing labels
-fall back to the full description. The desktop layout gives results
-44% of the two-pane content area; narrow screens stack the panes. A borderless
-scroll area keeps the results list bounded. Selected cases show the observation,
-mechanism, compact scope badges, and supporting evidence together. Structured and
-technical details remain collapsed.
+filters** section. Browse cards contain only demo factor labels and muted
+country/type/scope pills; a missing label displays “Unlabelled factor”. The desktop
+layout gives results 38% and details 62% of the content area; narrow screens stack
+the panes. Each compact card is clickable, with a native button for keyboard access.
+
+The selected factor description appears under **FACTOR**, above country/project metadata and native
+**Supporting evidence** / **Related observations** tabs. Each evidence span has
+its own warm yellow card with the verbatim quote, readable document type, stored
+publication date (or “Date unknown”), physical PDF page number, and existing source
+link. Related results appear above their controls once requested and can be
+selected to continue exploring. Raw observations and populated structured fields
+are available in the collapsed **Structured details** accordion inside Supporting
+evidence only. Sections with multiple values use bullet points. Technical metadata
+and internal document identifiers are not rendered, including in document filters.
+
+Browse sorting defaults to known document dates descending, then internal document
+key ascending (to keep same-date documents together), earliest physical evidence
+page ascending, and integer observation ID ascending (the stored observation order).
+Pagination uses an editable page box between backward and forward arrows; arrows
+are disabled at the first and last page. Unknown dates sort last. **Oldest first** reverses only the date direction, still
+placing unknown dates last. **Document order** uses document key, earliest evidence
+page, then observation ID, all ascending. Sorting occurs before pagination and never
+changes cosine ranking or the corpus/vector order. Search uses this same browse sort.
+
+Pill colors are muted blue-gray for Condition, teal for Action, lavender for
+Adaptation, and sand for Outcome; green for Actual, blue for Planned, amber for
+Anticipated, and mauve for Recommended. Country and unknown enum values use neutral
+gray. Exact foreground/background pairs are in the app's `PILL_COLORS` mapping.
+Document types display PAD as Project Appraisal Document, ISR as Implementation
+Status and Results Report, AF as Additional Financing, and RESTRUCTURING as
+Restructuring Paper, alongside stored country/project/date metadata.
 
 ## Frozen dataset
 
@@ -87,7 +111,8 @@ closed immediately after loading. The app never points at `data/derived/stage1.s
 The cached corpus uses immutable records and read-only NumPy arrays. Cosine uses
 computed norms and one matrix-vector product per request; no all-pairs matrix is
 created. Related results exclude the selected row and return up to five, independently
-of browsing filters. The two comparison constraints can be combined.
+of browsing filters. The comparison constraints remain unchanged in the retrieval
+layer; the UI offers independent document and country scopes.
 
 ## Streamlit Community Cloud deployment
 
@@ -130,15 +155,17 @@ visibility or app sharing settings have been changed by this implementation.
 ## Rehearsal seeds from actual stored-vector rankings
 
 Start with the totals, search **capacity**, and choose **Country → Comoros**.
-The recommended seed is **#1157**, on the first results page: select the mechanism
-beginning **“Insufficient institutional capacity to operationalize and manage a
-specialized payment system…”**. IDs are available in collapsed Technical metadata.
-Keep the keyword and country filter while opening related observations; they remain available when you
-return to the search selection. Below the supporting evidence, set **Search within
-→ Other countries**, then click **Find related observations**. The same control
-also offers Full corpus, Other documents, and Other documents and countries,
-preserving both restrictions together. Related results use the same label/description/metadata
-presentation as browsing results.
+The recommended seed is **#1157**: find the label
+**“Insufficient Capacity for Specialized Payment System Management”** (use pagination
+as needed), with a factor description beginning **“Insufficient institutional
+capacity to operationalize and manage a specialized payment system…”**. IDs in
+this guide are developer references and are not visible in the UI.
+Keep the keyword and country filter while opening **Related observations**; choose
+**Find related evidence in → Different countries**, then **Search**.
+The other scopes are **Anywhere in the corpus** (excluding the selected observation)
+and **Different documents**. Related cards show labels, pills, and a quiet score.
+Use **Search** to request results; the scope tooltip contains the semantic-similarity
+disclaimer.
 
 | Seed | Grounded evidence | Top cross-country result | Cosine |
 | --- | --- | --- | ---: |
@@ -191,6 +218,20 @@ Source availability and PDF-viewer page-fragment behavior depend on the World Ba
 host. Cloud deployment and anonymous access must still be verified in the user's
 Streamlit account; this task prepares the deployment without publishing it.
 
+UI refinement validation on November 2, 2026:
+
+- Ruff check and format check passed; Pyright reported zero errors or warnings.
+- All 16 focused explorer tests and all 169 repository tests passed.
+- Headless Chrome at 1440px and 390px verified full-card selection (including
+  clicks on pill positions), factor-first details, collapsed raw observations,
+  both exploration tabs, related-result chaining, source-link targets, separate
+  evidence cards, friendly document-filter options, and no horizontal overflow
+  or JavaScript errors. Screenshots were inspected at both widths.
+- The frozen snapshot checksum stayed unchanged. Retrieval, label generation,
+  source mapping, deployment files, and model/API behavior were not modified.
+- Native Streamlit tabs retain both panels in the render tree; no requested layout
+  deviation was needed. Community Cloud was not redeployed during this UI task.
+
 ## Temporary demo factor labels
 
 **Demo-only presentation labels. Not canonical taxonomy categories.** The nullable
@@ -227,9 +268,9 @@ are eligible for retry. The JSON quality report records exact duplicate labels
 without merging or normalizing them. Currency cost is not supplied by this API.
 `demo/evidence.json` is refreshed to describe the updated frozen artifact.
 
-Browsing and related cards show label, full factor description, then metadata.
-A title tooltip explains the demo label. The selected pane retains the exact
-observation, full factor description, evidence, metadata, and related results.
+Browsing and related cards show labels and compact metadata pills.
+The selected pane shows the full factor description, evidence, metadata, and related
+results; the exact observation remains in collapsed Structured details.
 Literal search and cosine similarity keep their existing inputs; labels never
 enter embeddings, similarity ranking, grouping, or deduplication.
 
