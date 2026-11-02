@@ -9,7 +9,10 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
-from digital_applications_prototype.explorer.data import load_corpus
+from digital_applications_prototype.explorer.data import (
+    load_corpus,
+    related_observations,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,7 +55,7 @@ namespace["render_card"](fallback, score=0.75)
         self.assertFalse(list(app.exception))
         corpus = load_corpus(self.snapshot)
         self.assertEqual(app.button[0].label, "Demo mechanism label")
-        self.assertEqual(app.button[1].label, "Unlabelled factor")
+        self.assertEqual(app.button[1].label, "Unlabelled factor · Compare →")
         self.assertFalse(
             any(
                 m.value == corpus.observations[0].factor_description
@@ -92,6 +95,8 @@ namespace["render_card"](fallback, score=0.75)
             len([b for b in app.button if b.key and b.key.startswith("related_")]), 5
         )
         app.button(key="related_1888").click().run()
+        self.assertEqual(app.session_state["selected_id"], 1157)
+        app.button(key="promote_comparison").click().run()
         self.assertEqual(app.session_state["selected_id"], 1888)
         self.assertIn("limited capacity of NaCSA", app.text[0].value)
         self.assertTrue(any("Date unknown · Page 5" in c.value for c in app.caption))
@@ -129,6 +134,7 @@ namespace["render_card"](fallback, score=0.75)
             .claim_scope,
             "planned",
         )
+
         app.text_input(key="keyword").set_value("no-such-evidence-00000").run()
         self.assertTrue(any("No observations match" in i.value for i in app.info))
         self.assertFalse(any(b.key and b.key.startswith("browse_") for b in app.button))
@@ -139,6 +145,80 @@ namespace["render_card"](fallback, score=0.75)
             .get(app.session_state["selected_id"])
             .claim_scope,
             "planned",
+        )
+
+    def test_comparison_pair_content_and_explicit_promotion(self):
+        app = self.app
+        corpus = load_corpus(self.snapshot)
+        anchor, candidate = corpus.get(1280), corpus.get(1828)
+        self.assertNotEqual(anchor.claim_scope, candidate.claim_scope)
+        app.text_input(key="keyword").set_value(anchor.factor_description).run()
+        app.button(key="browse_1280").click().run()
+        app.selectbox(key="related_scope").select("Different countries").run()
+        app.button(key="find_related").click().run()
+        before = {
+            key: app.session_state[key]
+            for key in ("selected_id", "browse_id", "results_page", "related_seed")
+        }
+        related_keys = [b.key for b in app.button if str(b.key).startswith("related_")]
+        app.button(key="related_1828").click().run()
+        for key, value in before.items():
+            self.assertEqual(app.session_state[key], value)
+        dialog = app.get("dialog")[0]
+        self.assertEqual(dialog.proto.dialog.title, "Compare implementation evidence")
+        self.assertEqual(
+            [m.value for m in dialog.markdown],
+            [
+                f"### {anchor.factor_label}",
+                anchor.factor_description,
+                "**Supporting evidence**",
+                f"### {candidate.factor_label}",
+                candidate.factor_description,
+                "**Supporting evidence**",
+            ],
+        )
+        self.assertEqual(
+            [t.value for t in dialog.text],
+            [anchor.evidence[0].quote, candidate.evidence[0].quote],
+        )
+        score = next(
+            score
+            for observation, score in related_observations(
+                corpus, anchor.observation_id, other_countries=True
+            )
+            if observation.observation_id == candidate.observation_id
+        )
+        captions = " ".join(c.value for c in dialog.caption)
+        self.assertIn(f"Semantic similarity: {score:.3f}", captions)
+        self.assertIn("Additional Financing · Jun 10, 2019", captions)
+        self.assertIn(
+            "does not imply equivalence, corroboration, or causality", captions
+        )
+        for observation, link in zip(
+            (anchor, candidate), dialog.get("link_button"), strict=True
+        ):
+            self.assertEqual(
+                link.proto.url,
+                f"{observation.source_url}#page={observation.evidence[0].page}",
+            )
+        for observation in corpus.observations:
+            self.assertNotIn(observation.document_id, captions)
+        # A normal rerun after dismissal cannot reopen/promote a comparison.
+        app.run()
+        self.assertEqual(app.session_state["selected_id"], anchor.observation_id)
+        self.assertFalse(app.get("dialog"))
+        self.assertEqual(
+            [b.key for b in app.button if str(b.key).startswith("related_")],
+            related_keys,
+        )
+        app.button(key="related_1828").click().run()
+        app.button(key="promote_comparison").click().run()
+        self.assertEqual(app.session_state["selected_id"], candidate.observation_id)
+        self.assertEqual(app.session_state["browse_id"], anchor.observation_id)
+        self.assertEqual(app.text_input(key="keyword").value, anchor.factor_description)
+        self.assertFalse(app.get("dialog"))
+        self.assertTrue(
+            any(m.value == candidate.factor_description for m in app.markdown)
         )
 
     def test_all_filters_and_comparison_choices_preserve_scope_and_meaning(self):
@@ -174,7 +254,9 @@ namespace["render_card"](fallback, score=0.75)
                     candidate = corpus.get(
                         int(str(button.key).removeprefix("related_"))
                     )
-                    self.assertEqual(button.label, candidate.display_title)
+                    self.assertEqual(
+                        button.label, f"{candidate.display_title} · Compare →"
+                    )
                     self.assertNotEqual(candidate.observation_id, seed.observation_id)
                     if scope == "Different documents":
                         self.assertNotEqual(candidate.document_id, seed.document_id)
@@ -200,15 +282,17 @@ namespace["render_card"](fallback, score=0.75)
             "Semantic similarity not equivalence or corroboration.",
         )
         self.assertFalse(any("Semantic similarity" in c.value for c in app.caption))
-        self.assertTrue(any(c.value == "FACTOR" for c in app.caption))
         self.assertEqual(len(app.tabs[0].expander), 1)
         self.assertEqual(len(app.tabs[1].expander), 0)
         corpus = load_corpus(self.snapshot)
         selected = corpus.get(app.session_state["selected_id"])
+        self.assertTrue(
+            any(m.value == f"### {selected.factor_label}" for m in app.markdown)
+        )
         country = selected.country.replace("_", " ").replace("-", " ").title()
         self.assertTrue(
             any(
-                c.value == f"{country} · Project {selected.project_id}"
+                c.value.startswith(f"{country} · Project {selected.project_id} · ")
                 for c in app.caption
             )
         )
@@ -282,6 +366,30 @@ namespace["render_card"](fallback, score=0.75)
             [t.value for t in evidence_tab.text], [s.quote for s in seed.evidence]
         )
         self.assertEqual(len(evidence_tab.get("link_button")), len(seed.evidence))
+
+    def test_comparison_preview_keeps_multiple_spans_compact(self):
+        app = AppTest.from_string(
+            f"""
+import runpy
+namespace = runpy.run_path({str(ROOT / "apps/evidence_explorer/app.py")!r})
+corpus = namespace["cached_corpus"]()
+observation = next(o for o in corpus.observations if len(o.evidence) > 1)
+namespace["render_comparison_factor"](observation, side="anchor")
+""",
+            default_timeout=20,
+        ).run()
+        self.assertFalse(list(app.exception))
+        observation = next(
+            o for o in load_corpus(self.snapshot).observations if len(o.evidence) > 1
+        )
+        self.assertEqual([t.value for t in app.text], [observation.evidence[0].quote])
+        self.assertEqual(len(app.get("link_button")), 1)
+        self.assertTrue(
+            any(
+                c.value == f"+ {len(observation.evidence) - 1} more supporting spans"
+                for c in app.caption
+            )
+        )
 
 
 if __name__ == "__main__":

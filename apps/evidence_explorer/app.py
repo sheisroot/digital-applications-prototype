@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from digital_applications_prototype.explorer.data import (
     Corpus,
+    Evidence,
     Observation,
     filter_observations,
     load_corpus,
@@ -160,50 +161,101 @@ def render_card(
     browsing: bool = False,
     selected: bool = False,
     score: float | None = None,
-) -> None:
-    """Native keyboard-accessible button expands across the entire compact card."""
+) -> bool:
+    """Return a comparison request; only browse cards change the selection."""
     prefix = "browse" if browsing else "related"
     state = "selected" if selected else "idle"
     with st.container(
         key=f"result_card_{prefix}_{state}_{observation.observation_id}", gap="small"
     ):
-        st.button(
-            observation.factor_label or "Unlabelled factor",
+        label = observation.factor_label or "Unlabelled factor"
+        clicked = st.button(
+            label if browsing else f"{label} · Compare →",
             key=f"{prefix}_{observation.observation_id}",
             type="tertiary",
             width="stretch",
             wrap=True,
-            on_click=select_browse_observation if browsing else open_observation,
-            args=(observation.observation_id,),
+            on_click=select_browse_observation if browsing else None,
+            args=(observation.observation_id,) if browsing else (),
         )
         render_pills(observation)
         if score is not None:
             st.caption(f"Similarity {score:.3f}")
+    return clicked
+
+
+def render_evidence_card(observation: Observation, span: Evidence, *, key: str) -> None:
+    with st.container(key=key, gap="small"):
+        # Text preserves verbatim quotes and keeps source markup inert.
+        st.text(span.quote)
+        page_label = f"{document_metadata(observation)} · Page {span.page}"
+        if span.role != "supports":
+            page_label += f" · {humanize(span.role)}"
+        st.caption(page_label)
+        if observation.source_url:
+            st.link_button(
+                "View source document", f"{observation.source_url}#page={span.page}"
+            )
+
+
+def render_comparison_factor(observation: Observation, *, side: str) -> None:
+    st.subheader("Selected factor" if side == "anchor" else "Related factor")
+    st.markdown(f"### {observation.factor_label or 'Unlabelled factor'}")
+    st.write(observation.factor_description)
+    render_pills(observation)
+    st.caption(document_label(observation))
+    st.markdown("**Supporting evidence**")
+    render_evidence_card(
+        observation,
+        observation.evidence[0],
+        key=f"evidence_card_compare_{side}_{observation.observation_id}",
+    )
+    remaining = len(observation.evidence) - 1
+    if remaining:
+        st.caption(f"+ {remaining} more supporting spans")
+
+
+@st.dialog("Compare implementation evidence", width="large")
+def render_comparison(
+    anchor: Observation, candidate: Observation, score: float
+) -> None:
+    # Dialog arguments retain the pair independently of the main selected_id.
+    # Native dismissal does not rerun the app or change any browsing state.
+    with st.container(key="comparison_workspace"):
+        left, right = st.columns(2, gap="large")
+        with left:
+            render_comparison_factor(anchor, side="anchor")
+        with right:
+            render_comparison_factor(candidate, side="candidate")
+            if st.button(
+                "Make this the selected observation",
+                key="promote_comparison",
+                on_click=open_observation,
+                args=(candidate.observation_id,),
+            ):
+                st.rerun()
+        st.caption(f"Semantic similarity: {score:.3f}")
+        st.caption(
+            "Similarity indicates related factor descriptions; it does not imply "
+            "equivalence, corroboration, or causality."
+        )
 
 
 def render_details(observation: Observation) -> None:
-    st.caption("FACTOR")
-    with st.container(key="selected_factor"):
-        st.write(observation.factor_description)
-    render_pills(observation)
-    st.caption(f"{humanize(observation.country)} · Project {observation.project_id}")
+    with st.container(key="selected_anchor"):
+        st.markdown(f"### {observation.factor_label or 'Unlabelled factor'}")
+        with st.container(key="selected_factor"):
+            st.write(observation.factor_description)
+        render_pills(observation)
+        st.caption(document_label(observation))
     supporting, related = st.tabs(["Supporting evidence", "Related observations"])
     with supporting:
         for index, span in enumerate(observation.evidence):
-            with st.container(
-                key=f"evidence_card_{observation.observation_id}_{index}", gap="small"
-            ):
-                # Text preserves verbatim quotes and keeps source markup inert.
-                st.text(span.quote)
-                page_label = f"{document_metadata(observation)} · Page {span.page}"
-                if span.role != "supports":
-                    page_label += f" · {humanize(span.role)}"
-                st.caption(page_label)
-                if observation.source_url:
-                    st.link_button(
-                        "View source document",
-                        f"{observation.source_url}#page={span.page}",
-                    )
+            render_evidence_card(
+                observation,
+                span,
+                key=f"evidence_card_{observation.observation_id}_{index}",
+            )
         render_structured_details(observation)
     with related:
         render_related(observation)
@@ -243,6 +295,7 @@ def render_structured_details(observation: Observation) -> None:
                         st.write(value)
 
 
+@st.fragment
 def render_related(observation: Observation) -> None:
     # Place results above controls once available, including after scope changes.
     results = st.container(key="related_results")
@@ -266,7 +319,8 @@ def render_related(observation: Observation) -> None:
         if not related:
             st.info("No related observations meet these constraints.")
         for candidate, score in related:
-            render_card(candidate, score=score)
+            if render_card(candidate, score=score):
+                render_comparison(observation, candidate, score)
 
 
 def render_filters(corpus: Corpus) -> dict[str, list[str]]:
@@ -348,18 +402,35 @@ def main() -> None:
         }
         .st-key-results_navigation [data-testid="stColumn"]:nth-child(2) {flex-grow: 2;}
         .st-key-results_page button {display: none;}
-        .st-key-selected_factor p {font-size: 1.2rem; line-height: 1.55;}
+        .st-key-selected_anchor {
+            background: #f0f4f7; border: 1px solid #d5dfe5;
+            padding: 1.25rem; border-radius: 8px;
+        }
+        .st-key-selected_anchor h3 {
+            font-size: 1.4rem; font-weight: 600; line-height: 1.35; padding: 0;
+        }
+        .st-key-selected_factor p {
+            font-size: 1.1rem; font-weight: 400; line-height: 1.55;
+        }
         .evidence-pills {display: flex; flex-wrap: wrap; gap: 0.3rem;}
         .evidence-pill {
             display: inline-block; border-radius: 12px; padding: 0.15rem 0.5rem;
             font-size: 0.75rem; line-height: 1.4;
         }
         [class*="st-key-evidence_card_"] {
-            background: #fff9e9; color: #34322d; border: 1px solid #e9dfbd;
+            background: #fffdf6; color: #34322d; border: 1px solid #e9dfbd;
             padding: 1rem; border-radius: 8px;
         }
         [class*="st-key-evidence_card_"] [data-testid="stText"] {
             font-family: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+        }
+        .st-key-comparison_workspace [data-testid="stColumn"] {min-width: 0;}
+        .st-key-comparison_workspace {overflow-wrap: anywhere;}
+        @media (max-width: 760px) {
+            .st-key-comparison_workspace [data-testid="stHorizontalBlock"] {
+                flex-direction: column;
+            }
+            .st-key-comparison_workspace [data-testid="stColumn"] {width: 100%;}
         }
         @media (max-width: 640px) {
             .stMainBlockContainer {padding: 3.5rem 1rem 1rem;}

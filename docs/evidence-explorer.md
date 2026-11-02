@@ -33,15 +33,32 @@ country/type/scope pills; a missing label displays “Unlabelled factor”. The 
 layout gives results 38% and details 62% of the content area; narrow screens stack
 the panes. Each compact card is clickable, with a native button for keyboard access.
 
-The selected factor description appears under **FACTOR**, above country/project metadata and native
-**Supporting evidence** / **Related observations** tabs. Each evidence span has
+The selected anchor panel leads with the exact factor label from the result card,
+followed by the full description, metadata pills, and quiet project/document/date
+context above native **Supporting evidence** / **Related observations** tabs.
+The label replaces the generic FACTOR eyebrow. Each evidence span has
 its own warm yellow card with the verbatim quote, readable document type, stored
 publication date (or “Date unknown”), physical PDF page number, and existing source
-link. Related results appear above their controls once requested and can be
-selected to continue exploring. Raw observations and populated structured fields
+link. Related results appear above their controls once requested. Their **Compare →**
+actions open **Compare implementation evidence**, a wide native Streamlit dialog.
+The selected factor stays on the left and the related candidate appears on the
+right, with full descriptions, existing pills, friendly document context, and the
+first supporting evidence card on each side. Additional spans are counted rather
+than expanded; all spans remain available in the normal detail view. The existing
+cosine score and a limited-meaning disclaimer appear below the comparison.
+Columns stack on narrow screens. Raw observations and populated structured fields
 are available in the collapsed **Structured details** accordion inside Supporting
 evidence only. Sections with multiple values use bullet points. Technical metadata
 and internal document identifiers are not rendered, including in document filters.
+
+Related controls run in a Streamlit fragment. Opening or dismissing a comparison
+preserves the selected observation, active tab, related list, filters, search, and
+pagination. The dialog receives separate immutable anchor/candidate arguments and
+the score returned for that pair; it does not reuse `selected_id` for the candidate.
+Only **Make this the selected observation** sets `selected_id` to the candidate,
+then reruns the app to close the dialog and show its normal details. Browse filters,
+search, and pagination stay in place, and **Back to search selection** remains
+available. No additional session-state flags or model/API calls are needed.
 
 Browse sorting defaults to known document dates descending, then internal document
 key ascending (to keep same-date documents together), earliest physical evidence
@@ -173,10 +190,13 @@ disclaimer.
 | **#1234** (results page 3), `KM_PAD_2020`, actual: low implementation capacity required support | Physical PDF p. 30, “capacity is low” | **#1637**, `SL_PAD_2014`, anticipated: capacity could affect timely implementation; its own quote is on p. 51 | 0.766 |
 | **#1280** (results page 4), `KM_PAD_2020`, actual: the World Bank team organized STEP training | Physical PDF p. 56, training quotation | **#1828**, `SL_AF2_2019`, planned: management committed to STEP training; its own quote is on p. 26 | 0.740 |
 
-For the main flow, select the related mechanism **“Insufficient payment personnel
+For the main flow, compare the related mechanism **“Insufficient payment personnel
 and institutional capacity limited the ability to deliver payments simultaneously
 across the country.”** (**#1888**), then show its independent Sierra Leone quote
-and physical p. 5 in Supporting evidence. The explicit scope
+and physical p. 5 beside the selected factor. Close the dialog to retain the anchor,
+then reopen and choose **Make this the selected observation** to continue exploring.
+For a scope contrast, compare Comoros **#1280** with Sierra Leone **#1828**:
+actual training versus planned training, with similarity **0.740**. The explicit scope
 difference in the second and third alternatives illustrates why similarity alone
 cannot establish corroboration. Finish by opening Advanced filters and changing
 **Document type → ISR**.
@@ -231,6 +251,17 @@ UI refinement validation on November 2, 2026:
   source mapping, deployment files, and model/API behavior were not modified.
 - Native Streamlit tabs retain both panels in the render tree; no requested layout
   deviation was needed. Community Cloud was not redeployed during this UI task.
+
+Comparison-dialog validation on November 2, 2026:
+
+- Chrome at 1440px and 390px verified the real #1280/#1828 actual/planned pair,
+  side-by-side desktop layout, stacked mobile layout without horizontal overflow,
+  independent source-link targets, and no JavaScript errors. Screenshots were inspected.
+- Escape dismissal preserved the anchor, Related observations tab, result list,
+  search, and pagination. Reopening and explicitly promoting the candidate closed
+  the dialog and allowed another related search/comparison from the new anchor.
+- Native `st.dialog(width="large")` and `st.fragment` work in the installed/pinned
+  Streamlit 1.66.1; no modal fallback or main-page restructuring was needed.
 
 ## Temporary demo factor labels
 
