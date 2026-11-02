@@ -20,6 +20,20 @@ from digital_applications_prototype.explorer.data import (
 
 SNAPSHOT = ROOT / "demo/evidence.sqlite"
 PAGE_SIZE = 10
+SCOPE_HELP = {
+    "actual": "Reported as actual in the source.",
+    "planned": "A planned activity; not an observed implementation result.",
+    "anticipated": "An anticipated condition or effect; not an observed result.",
+    "recommended": "A recommendation; not an observed implementation result.",
+    "inferred": "An inferred claim; not an explicitly reported implementation result.",
+}
+SCOPE_COLORS = {
+    "actual": "green",
+    "planned": "blue",
+    "anticipated": "orange",
+    "recommended": "violet",
+    "inferred": "gray",
+}
 
 
 @st.cache_resource(show_spinner="Loading the frozen evidence corpus…")
@@ -36,45 +50,57 @@ def open_observation(observation_id: int) -> None:
     st.session_state["selected_id"] = observation_id
 
 
-def select_result() -> None:
-    open_observation(st.session_state["result_choice"])
+def select_browse_observation(observation_id: int) -> None:
+    st.session_state["browse_id"] = observation_id
+    open_observation(observation_id)
 
 
-def result_label(observation: Observation) -> str:
-    text = observation.observation
-    preview = text if len(text) <= 125 else text[:122] + "…"
-    return (
-        f"#{observation.observation_id} · {humanize(observation.country)} · "
-        f"{observation.claim_scope.upper()} · {observation.document_id}\n\n{preview}"
+def render_card(
+    observation: Observation,
+    *,
+    browsing: bool = False,
+    selected: bool = False,
+    score: float | None = None,
+) -> None:
+    """Use the same mechanism-first presentation for browsing and related results."""
+    prefix = "browse" if browsing else "related"
+    st.button(
+        observation.factor_description,
+        key=f"{prefix}_{observation.observation_id}",
+        type="secondary" if selected else "tertiary",
+        width="stretch",
+        wrap=True,
+        on_click=select_browse_observation if browsing else open_observation,
+        args=(observation.observation_id,),
     )
+    metadata = (
+        f"{humanize(observation.country)} · "
+        f"{humanize(observation.observation_type)} · {humanize(observation.claim_scope)}"
+    )
+    if score is not None:
+        metadata += f" · Similarity {score:.3f}"
+    st.caption(metadata)
 
 
 def render_details(observation: Observation) -> None:
-    st.caption(f"SELECTED OBSERVATION · #{observation.observation_id}")
-    scope_text = f"Claim scope: {humanize(observation.claim_scope)}"
-    if observation.claim_scope == "actual":
-        st.success(scope_text + " · Reported as actual in the source.")
-    else:
-        st.warning(
-            scope_text + " · Do not read this as an observed implementation result."
-        )
+    scope = observation.claim_scope
+    st.markdown(
+        f":gray-badge[{humanize(observation.observation_type)}] "
+        f":{SCOPE_COLORS[scope]}-badge[{humanize(scope)}] "
+        f":gray-badge[{humanize(observation.country)}]",
+        help=f"Claim scope: {humanize(scope)}. {SCOPE_HELP[scope]}",
+    )
     st.subheader("Observation")
     st.write(observation.observation)
     st.markdown("**Factor / mechanism**")
     st.write(observation.factor_description)
-    st.caption(
-        f"Type: {humanize(observation.observation_type)} · "
-        f"Valence: {humanize(observation.valence)}"
+    metadata = (
+        f"{humanize(observation.country)} · Project {observation.project_id} · "
+        f"{observation.document_id} · {observation.document_type}"
     )
-    st.markdown(
-        f"**{humanize(observation.country)}** · Project **{observation.project_id}**"
-    )
-    st.caption(
-        f"{observation.document_id} · {observation.document_type} · "
-        f"Document date: {observation.document_date or 'Not recorded'}"
-    )
-    if observation.source_url:
-        st.link_button("View source document", observation.source_url)
+    if observation.document_date:
+        metadata += f" · {observation.document_date}"
+    st.caption(metadata)
     with st.expander("Structured details", expanded=False):
         for label, values in (
             ("Actors", observation.actors),
@@ -91,71 +117,111 @@ def render_details(observation: Observation) -> None:
         if observation.implementation_area:
             st.markdown("**Implementation area (source extraction label)**")
             st.write(observation.implementation_area)
-        st.caption(f"Provenance ID: {observation.provenance_id or 'Not recorded'}")
+        st.caption(f"Valence: {humanize(observation.valence)}")
 
-    evidence_tab, related_tab = st.tabs(["Supporting evidence", "Related observations"])
-    with evidence_tab:
-        st.caption(
-            "Exact extracted quotations · Page numbers count physical PDF pages from 1."
-        )
-        for span in observation.evidence:
-            with st.container(border=True):
-                st.markdown(
-                    f"**Physical PDF page {span.page}** · {humanize(span.role)}"
-                )
-                # Text rendering keeps document-authored markup inert.
-                st.text(span.quote)
-                st.caption(
-                    f"{observation.document_id} · {observation.document_type} · "
-                    f"{humanize(observation.country)} · {observation.project_id} · "
-                    f"Document date: {observation.document_date or 'Not recorded'}"
-                )
-                if observation.source_url:
-                    st.link_button(
-                        "View source document",
-                        f"{observation.source_url}#page={span.page}",
-                    )
-    with related_tab:
-        render_related(observation)
+    st.subheader("Supporting evidence")
+    for index, span in enumerate(observation.evidence):
+        if index:
+            st.divider()
+        # Text rendering preserves the exact quote and keeps source markup inert.
+        st.text(span.quote)
+        page_label = f"Physical PDF page {span.page}"
+        if span.role != "supports":
+            page_label += f" · {humanize(span.role)}"
+        st.caption(page_label)
+        if observation.source_url:
+            st.link_button(
+                "View source document", f"{observation.source_url}#page={span.page}"
+            )
+
+    st.divider()
+    render_related(observation)
+    with st.expander("Technical metadata", expanded=False):
+        st.caption(f"Observation ID: {observation.observation_id}")
+        st.caption(f"Provenance ID: {observation.provenance_id or 'Not recorded'}")
 
 
 def render_related(observation: Observation) -> None:
-    st.subheader("Find related observations")
-    st.caption(
-        "Semantic similarity of factor descriptions, not equivalence or corroboration. "
-        "Compares the full frozen corpus independently of browsing filters."
+    st.subheader("Related observations")
+    st.caption("Semantic similarity, not equivalence or corroboration.")
+    scope = st.selectbox(
+        "Search within",
+        (
+            "Full corpus",
+            "Other documents",
+            "Other countries",
+            "Other documents and countries",
+        ),
+        key="related_scope",
+        help="Compares the corpus independently of browsing filters.",
     )
-    other_documents = st.checkbox("Other documents only", key="other_documents")
-    other_countries = st.checkbox("Other countries only", key="other_countries")
-    if st.button("Find related observations", key="find_related", type="primary"):
+    if st.button("Find related observations", key="find_related"):
         st.session_state["related_seed"] = observation.observation_id
     if st.session_state.get("related_seed") != observation.observation_id:
         return
     related = related_observations(
         cached_corpus(),
         observation.observation_id,
-        other_documents=other_documents,
-        other_countries=other_countries,
+        other_documents=scope in {"Other documents", "Other documents and countries"},
+        other_countries=scope in {"Other countries", "Other documents and countries"},
     )
     if not related:
         st.info("No related observations meet these constraints.")
-    for candidate, score in related:
-        with st.container(border=True):
-            st.caption(
-                f"{humanize(candidate.country)} · {candidate.document_id} · "
-                f"Scope: {humanize(candidate.claim_scope)} · Similarity {score:.3f}"
+    with st.container(key="related_results"):
+        for index, (candidate, score) in enumerate(related):
+            if index:
+                st.divider()
+            render_card(candidate, score=score)
+
+
+def render_filters(corpus: Corpus) -> dict[str, list[str]]:
+    filters: dict[str, list[str]] = {}
+    basic = (
+        ("country", "Country"),
+        ("observation_type", "Observation type"),
+        ("claim_scope", "Claim scope"),
+    )
+    advanced = (
+        ("project_id", "Project"),
+        ("document_id", "Document"),
+        ("document_type", "Document type"),
+        ("valence", "Valence"),
+    )
+    for column, (field, label) in zip(st.columns(3), basic, strict=True):
+        with column:
+            filters[field] = st.multiselect(
+                label,
+                sorted({str(getattr(o, field)) for o in corpus.observations}),
+                key=f"filter_{field}",
+                format_func=humanize,
             )
-            st.write(candidate.observation)
-            st.button(
-                f"Inspect evidence · #{candidate.observation_id}",
-                key=f"related_{candidate.observation_id}",
-                on_click=open_observation,
-                args=(candidate.observation_id,),
-            )
+    with st.expander("Advanced filters", expanded=False):
+        for column, (field, label) in zip(st.columns(4), advanced, strict=True):
+            with column:
+                filters[field] = st.multiselect(
+                    label,
+                    sorted({str(getattr(o, field)) for o in corpus.observations}),
+                    key=f"filter_{field}",
+                    format_func=humanize if field == "valence" else str,
+                )
+    return filters
 
 
 def main() -> None:
     st.set_page_config(page_title="Evidence Explorer", page_icon="🔎", layout="wide")
+    # Scope styling to the two result lists; retain native keyboard/button behavior.
+    st.html("""
+        <style>
+        .stMainBlockContainer {max-width: 1480px; padding-top: 2rem;}
+        .st-key-browse_results button, .st-key-related_results button {
+            justify-content: flex-start; text-align: left; height: auto;
+        }
+        .st-key-browse_results button p, .st-key-related_results button p {
+            text-align: left; font-weight: 600; font-size: 1rem; line-height: 1.5;
+        }
+        .st-key-browse_results hr, .st-key-related_results hr {margin: 0.5rem 0;}
+        </style>
+    """)
     st.title("Evidence Explorer")
     st.markdown("Explore implementation observations across projects and countries")
     st.caption(
@@ -168,91 +234,68 @@ def main() -> None:
             "The frozen demo dataset could not be loaded. Check the deployment files."
         )
         st.stop()
-    totals = st.columns(3)
-    totals[0].metric("Observations", f"{len(corpus.observations):,}")
-    totals[1].metric("Documents", len({o.document_id for o in corpus.observations}))
-    totals[2].metric("Countries", len({o.country for o in corpus.observations}))
-    with st.sidebar:
-        st.header("Filter observations")
-        filters: dict[str, list[str]] = {}
-        for field, label in (
-            ("country", "Country"),
-            ("project_id", "Project"),
-            ("document_id", "Document"),
-            ("document_type", "Document type"),
-            ("observation_type", "Observation type"),
-            ("valence", "Valence"),
-            ("claim_scope", "Claim scope"),
-        ):
-            options = sorted({str(getattr(o, field)) for o in corpus.observations})
-            filters[field] = st.multiselect(
-                label,
-                options,
-                key=f"filter_{field}",
-                format_func=humanize
-                if field not in {"document_id", "project_id", "document_type"}
-                else str,
-            )
-        st.caption(
-            "Filters use stored extraction metadata. Empty selections include all values."
-        )
+    st.caption(
+        f"{len(corpus.observations):,} observations · "
+        f"{len({o.document_id for o in corpus.observations})} documents · "
+        f"{len({o.country for o in corpus.observations})} countries"
+    )
     keyword = st.text_input(
         "Keyword search",
-        placeholder="Try capacity, procurement, or payments",
+        placeholder="Search implementation evidence...",
         key="keyword",
+        help="Search observation text, factor descriptions, and extraction area labels.",
+        label_visibility="collapsed",
     )
-    st.caption(
-        "Search observation text, factor descriptions, and extraction area labels."
-    )
+    filters = render_filters(corpus)
     results = filter_observations(corpus.observations, keyword=keyword, filters=filters)
     signature = (keyword, tuple((key, tuple(value)) for key, value in filters.items()))
     if st.session_state.get("filter_signature") != signature:
         st.session_state["filter_signature"] = signature
         st.session_state["results_page"] = 1
-        st.session_state.pop("result_choice", None)
-        if results:
-            open_observation(results[0].observation_id)
+        st.session_state.pop("browse_id", None)
     if not results:
         st.info("No observations match. Clear the keyword or adjust a metadata filter.")
         return
-    browse, detail = st.columns([2, 3], gap="large")
+    browse, detail = st.columns([0.44, 0.56], gap="large")
     with browse:
-        st.subheader(f"{len(results):,} matching observations")
         pages = (len(results) + PAGE_SIZE - 1) // PAGE_SIZE
-        page = int(
-            st.number_input(
-                "Results page", min_value=1, max_value=pages, key="results_page"
+        count_column, page_column = st.columns([3, 1], vertical_alignment="center")
+        with page_column:
+            page = int(
+                st.number_input(
+                    "Results page",
+                    min_value=1,
+                    max_value=pages,
+                    key="results_page",
+                    label_visibility="collapsed",
+                    help=f"Choose a page (1–{pages}).",
+                )
             )
-        )
-        st.caption(
-            f"Page {page} of {pages} · Select an observation to inspect its evidence."
-        )
+        count_column.caption(f"{len(results):,} results · Page {page} of {pages}")
         visible = results[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
         ids = [o.observation_id for o in visible]
-        if st.session_state.get("result_choice") not in ids:
-            st.session_state["result_choice"] = ids[0]
-            open_observation(ids[0])
-        with st.container(height=570, border=True):
-            st.radio(
-                "Observations",
-                ids,
-                format_func=lambda value: result_label(corpus.get(value)),
-                key="result_choice",
-                on_change=select_result,
-                label_visibility="collapsed",
-            )
-    selected_id = int(st.session_state["selected_id"])
+        if st.session_state.get("browse_id") not in ids:
+            select_browse_observation(ids[0])
+        with st.container(height=740, border=False, key="browse_results"):
+            for index, observation in enumerate(visible):
+                if index:
+                    st.divider()
+                render_card(
+                    observation,
+                    browsing=True,
+                    selected=observation.observation_id
+                    == st.session_state["selected_id"],
+                )
     with detail:
-        if selected_id != st.session_state["result_choice"]:
-            st.caption(
-                "Inspecting a related observation. Your search and filters are preserved."
-            )
+        if st.session_state["selected_id"] != st.session_state["browse_id"]:
             st.button(
                 "Back to search selection",
+                key="back_to_results",
+                type="tertiary",
                 on_click=open_observation,
-                args=(int(st.session_state["result_choice"]),),
+                args=(int(st.session_state["browse_id"]),),
             )
-        render_details(corpus.get(selected_id))
+        render_details(corpus.get(int(st.session_state["selected_id"])))
 
 
 if __name__ == "__main__":

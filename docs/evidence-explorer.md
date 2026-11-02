@@ -26,6 +26,15 @@ The root uv environment also contains the existing research pipeline dependencie
 The entrypoint adds this checkout's `src/` directory to its import path so Cloud
 does not need to install the pipeline package.
 
+Search comes first, followed by Country, Observation type, and Claim scope.
+Project, Document, Document type, and Valence remain in the collapsed **Advanced
+filters** section. Results use exact factor descriptions as selectable mechanism
+text, with compact country/type/scope metadata. The desktop layout gives results
+44% of the two-pane content area; narrow screens stack the panes. A borderless
+scroll area keeps the results list bounded. Selected cases show the observation,
+mechanism, compact scope badges, and supporting evidence together. Structured and
+technical details remain collapsed.
+
 ## Frozen dataset
 
 | Item | Count |
@@ -120,10 +129,15 @@ visibility or app sharing settings have been changed by this implementation.
 ## Rehearsal seeds from actual stored-vector rankings
 
 Start with the totals, search **capacity**, and choose **Country → Comoros**.
-The recommended seed is **#1157**, on the first results page. Keep the keyword and
-country filter while opening related observations; they remain available when you
-return to the search selection. Choose the **Related observations** tab, check
-**Other countries only**, then click **Find related observations**.
+The recommended seed is **#1157**, on the first results page: select the mechanism
+beginning **“Insufficient institutional capacity to operationalize and manage a
+specialized payment system…”**. IDs are available in collapsed Technical metadata.
+Keep the keyword and country filter while opening related observations; they remain available when you
+return to the search selection. Below the supporting evidence, set **Search within
+→ Other countries**, then click **Find related observations**. The same control
+also offers Full corpus, Other documents, and Other documents and countries,
+preserving both restrictions together. Related results use the same mechanism-first
+presentation as browsing results.
 
 | Seed | Grounded evidence | Top cross-country result | Cosine |
 | --- | --- | --- | ---: |
@@ -131,10 +145,13 @@ return to the search selection. Choose the **Related observations** tab, check
 | **#1234** (results page 3), `KM_PAD_2020`, actual: low implementation capacity required support | Physical PDF p. 30, “capacity is low” | **#1637**, `SL_PAD_2014`, anticipated: capacity could affect timely implementation; its own quote is on p. 51 | 0.766 |
 | **#1280** (results page 4), `KM_PAD_2020`, actual: the World Bank team organized STEP training | Physical PDF p. 56, training quotation | **#1828**, `SL_AF2_2019`, planned: management committed to STEP training; its own quote is on p. 26 | 0.740 |
 
-For the main flow, inspect **#1888**, switch back to **Supporting evidence**, and
-show its independent Sierra Leone quote and physical p. 5. The explicit scope
+For the main flow, select the related mechanism **“Insufficient payment personnel
+and institutional capacity limited the ability to deliver payments simultaneously
+across the country.”** (**#1888**), then show its independent Sierra Leone quote
+and physical p. 5 in Supporting evidence. The explicit scope
 difference in the second and third alternatives illustrates why similarity alone
-cannot establish corroboration. Finish by changing **Document type → ISR**.
+cannot establish corroboration. Finish by opening Advanced filters and changing
+**Document type → ISR**.
 No seed, country, keyword, or related result is hard-coded into the app.
 
 ## Verification and limits
@@ -156,7 +173,7 @@ flow. Browser smoke testing also checks source links and filter switching.
 Implementation verification on November 2, 2026:
 
 - Ruff check and format check passed; Pyright reported zero errors or warnings.
-- All 12 focused explorer tests passed. The full 159-test repository suite passed,
+- All 13 focused explorer tests passed. The full 160-test repository suite passed,
   including the persistence and embedding tests.
 - Every snapshot vector was compared against canonical storage by integer
   observation ID and exact source text: all 1,093 matched without numeric changes.
