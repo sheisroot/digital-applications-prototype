@@ -114,6 +114,7 @@ class RepositoryTests(unittest.IsolatedAsyncioTestCase):
                     "evidence_spans",
                     "extraction_chunk_sources",
                     "validation_revisions",
+                    "observation_embeddings",
                 },
             )
             self.assertEqual(

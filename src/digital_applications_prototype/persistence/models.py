@@ -153,3 +153,49 @@ class EvidenceSpanRow(Base):
     page: Mapped[int]
     evidence_date: Mapped[date | None] = mapped_column(Date)
     role: Mapped[str]
+
+
+class ObservationEmbedding(Base):
+    """Append-only representations; Stage 1 rows remain the source of provenance."""
+
+    __tablename__ = "observation_embeddings"
+    __table_args__ = (
+        UniqueConstraint(
+            "observation_id",
+            "representation",
+            "requested_model",
+            "model",
+            "dimensions_mode",
+            "dimensions",
+            "source_text_hash",
+        ),
+        CheckConstraint("dimensions > 0"),
+        CheckConstraint("length(source_text_hash) = 64"),
+        CheckConstraint(
+            "json_valid(embedding_json) AND json_type(embedding_json) = 'array' "
+            "AND json_array_length(embedding_json) = dimensions"
+        ),
+        Index(
+            "ix_observation_embeddings_current",
+            "requested_model",
+            "representation",
+            "dimensions_mode",
+            "observation_id",
+            "source_text_hash",
+        ),
+    )
+
+    embedding_id: Mapped[int] = mapped_column(primary_key=True)
+    observation_id: Mapped[int] = mapped_column(
+        ForeignKey("implementation_observations.observation_id"), index=True
+    )
+    representation: Mapped[str]
+    requested_model: Mapped[str]
+    model: Mapped[str]
+    # Distinguish full/default requests from future explicitly shortened vectors.
+    dimensions_mode: Mapped[str] = mapped_column(default="default")
+    dimensions: Mapped[int]
+    source_text: Mapped[str]
+    source_text_hash: Mapped[str]
+    embedding_json: Mapped[list[float]] = mapped_column(JSON)
+    created_at: Mapped[str]

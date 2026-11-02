@@ -531,7 +531,7 @@ class ConcurrencyCLITests(unittest.TestCase):
                         connection.execute(
                             "SELECT max_concurrency FROM extraction_runs"
                         ).fetchone()[0],
-                        3 if concurrency is None else concurrency,
+                        8 if concurrency is None else concurrency,
                     )
 
     def test_cli_rejects_nonpositive_concurrency(self):

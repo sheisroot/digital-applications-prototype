@@ -363,13 +363,20 @@ async def run_documents(
 
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["embed"]:
+        from digital_applications_prototype.embeddings.cli import main as embed_main
+
+        return embed_main(arguments[1:])
     if arguments[:1] == ["revalidate"]:
         from .revalidation import main as revalidate_main
 
         return revalidate_main(arguments[1:])
     parser = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Offline validation of saved observations: extract-observations revalidate --help",
+        epilog=(
+            "Saved observations: extract-observations revalidate --help; "
+            "semantic embeddings: extract-observations embed --help"
+        ),
     )
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument(
@@ -394,8 +401,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=3,
-        help="Maximum active chunk extractions within one document (default: 3)",
+        default=8,
+        help="Maximum active chunk extractions within one document (default: 8)",
     )
     parser.add_argument(
         "--no-export", action="store_true", help="Keep results only in SQLite"

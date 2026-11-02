@@ -12,7 +12,11 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from digital_applications_prototype.core import config
-from digital_applications_prototype.core.config import Settings
+from digital_applications_prototype.core.config import (
+    EmbeddingSettings,
+    OpenAISettings,
+    Settings,
+)
 from digital_applications_prototype.llm.adapters.base import TokenUsage
 from digital_applications_prototype.llm.adapters.openai import (
     OpenAIAdapter,
@@ -306,3 +310,35 @@ class SettingsTests(unittest.TestCase):
         os.environ["OPENAI_API_KEY"] = ""
         with self.assertRaises(ValidationError):
             Settings.from_env()
+
+    def test_embedding_model_default_and_independent_environment_override(self):
+        self.assertEqual(
+            EmbeddingSettings.from_env().embedding_model, "text-embedding-3-large"
+        )
+        os.environ.update(
+            OPENAI_API_KEY="test-secret",
+            LLM_MODEL="generation-only",
+            EMBEDDING_MODEL="text-embedding-3-small",
+        )
+        settings = Settings.from_env()
+        self.assertEqual(settings.embedding_model, "text-embedding-3-small")
+        self.assertEqual(settings.llm_model, "generation-only")
+        self.assertNotIn("test-secret", repr(settings))
+        del os.environ["LLM_MODEL"]
+        self.assertEqual(
+            OpenAISettings.from_env().openai_api_key.get_secret_value(), "test-secret"
+        )
+        self.assertEqual(
+            EmbeddingSettings.from_env().embedding_model, "text-embedding-3-small"
+        )
+
+    def test_embedding_model_dotenv_and_process_precedence(self):
+        self.env_file.write_text("EMBEDDING_MODEL=file-embedding\n", encoding="utf-8")
+        self.assertEqual(EmbeddingSettings.from_env().embedding_model, "file-embedding")
+        os.environ["EMBEDDING_MODEL"] = "process-embedding"
+        self.assertEqual(
+            EmbeddingSettings.from_env().embedding_model, "process-embedding"
+        )
+        os.environ["EMBEDDING_MODEL"] = ""
+        with self.assertRaises(ValidationError):
+            EmbeddingSettings.from_env()

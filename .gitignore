@@ -1,5 +1,6 @@
 # Local data, including stage1.sqlite and SQLite WAL/SHM sidecars
 data/
+experiments/
 
 # Local environment variants; keep the example template
 .env.*

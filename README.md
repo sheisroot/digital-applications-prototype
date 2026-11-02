@@ -143,3 +143,24 @@ validation rules, and one-document pilot commands.
 commands, and the saved `KM_PAD_2020` investigation. Its
 [deferred evidence limitations](docs/stage1-revalidation.md#deferred-evidence-location-and-spacing-work)
 cover cross-page quotes, structured table evidence, and two narrow spacing cases.
+
+## Semantic embeddings
+
+[The embedding stage](docs/embeddings.md) persists exact `factor_description`
+representations from explicitly selected Stage 1 runs. It uses the separate
+`EMBEDDING_MODEL` setting (default `text-embedding-3-large`) and the existing
+OpenAI API key. Add `EMBEDDING_MODEL=text-embedding-3-large` to your ignored `.env`;
+the new `.env.example` documents the settings without credentials.
+
+Create a text manifest with one intentionally selected extraction run ID per line,
+then preview and execute:
+
+```sh
+uv run extract-observations embed --run-ids-file experiments/mini_corpus_v1_runs.txt --dry-run
+uv run extract-observations embed --run-ids-file experiments/mini_corpus_v1_runs.txt
+```
+
+Dry runs make no API calls or database changes. Live runs use transactional batches
+and skip current embeddings on rerun. Repeated `--run-id` and explicit `--all` are
+also supported; multiple selected runs for one document fail by default. This stage
+leaves Stage 1 records intact and does not perform similarity analysis or clustering.
