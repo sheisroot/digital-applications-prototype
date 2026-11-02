@@ -1,0 +1,3 @@
+# Entrypoint-local requirements take precedence over the root pipeline uv.lock.
+streamlit==1.66.1
+numpy==2.5.4

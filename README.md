@@ -12,6 +12,19 @@ uv run python -m unittest discover -s tests -v
 
 Tests use local fakes/mocks; they need no credentials and make no model calls.
 
+## Evidence Explorer demo
+
+```sh
+uv sync
+uv run streamlit run apps/evidence_explorer/app.py
+```
+
+The explorer uses the checked-in frozen snapshot in `demo/evidence.sqlite`:
+1,093 observations from 15 selected documents across three countries, with exact
+evidence quotations, physical PDF pages, public source links, and precomputed
+semantic similarity. It needs no credentials, local PDFs, or canonical database.
+See [the launch, deployment, and rehearsal guide](docs/evidence-explorer.md).
+
 ## Architecture and file responsibilities
 
 ```text

@@ -1,0 +1,11 @@
+{
+  "documents": 15,
+  "observations": 1093,
+  "countries": 3,
+  "evidence_spans": 1187,
+  "embeddings": 1093,
+  "dimensions": 3072,
+  "model": "text-embedding-3-large",
+  "bytes": 28479488,
+  "sha256": "f0bcb06fce0227c0d1cf5307146997425af3ebbc7d69bf54ee1cf9dd08a3c3cd"
+}
