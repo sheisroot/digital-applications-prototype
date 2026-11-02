@@ -10,10 +10,14 @@ from .models import Base
 
 
 class Database:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, read_only: bool = False) -> None:
         self.path = path.resolve()
         self.engine = create_async_engine(
-            URL.create("sqlite+aiosqlite", database=str(self.path)),
+            URL.create(
+                "sqlite+aiosqlite",
+                database=self.path.as_uri() if read_only else str(self.path),
+                query={"mode": "ro", "uri": "true"} if read_only else {},
+            ),
             connect_args={"timeout": 30},
         )
         self.sessions = async_sessionmaker(
@@ -23,7 +27,8 @@ class Database:
         @event.listens_for(self.engine.sync_engine, "connect")
         def configure_connection(connection: Any, _record: Any) -> None:
             cursor = connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
+            if not read_only:
+                cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
             # FULL sync preserves committed work across power loss as well as crashes.
             cursor.execute("PRAGMA synchronous=FULL")

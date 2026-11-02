@@ -55,6 +55,31 @@ class ExtractionChunk(Base):
     warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
 
+class ChunkSource(Base):
+    """Exact model-facing pages, including the bounded overlap, for offline checks."""
+
+    __tablename__ = "extraction_chunk_sources"
+
+    chunk_id: Mapped[int] = mapped_column(
+        ForeignKey("extraction_chunks.chunk_id"), primary_key=True
+    )
+    source_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class ValidationRevision(Base):
+    """Append-only derived-state audit; extraction history remains untouched."""
+
+    __tablename__ = "validation_revisions"
+
+    revalidation_id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.run_id"), index=True)
+    validator_version: Mapped[str]
+    revalidated_at: Mapped[str]
+    source_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    changes_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+
+
 class Observation(Base):
     __tablename__ = "implementation_observations"
     __table_args__ = (

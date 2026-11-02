@@ -20,12 +20,13 @@ src/digital_applications_prototype/
 │   ├── chunking.py                    # Deterministic page-boundary chunks
 │   ├── service.py                     # Prompt → LLMService → validated observations
 │   ├── validation.py                  # Grounding, page checks and deterministic IDs
+│   ├── revalidation.py                # Offline preview, backup, apply and audit
 │   ├── persistence.py                 # Optional atomic JSONL/report exports
 │   └── cli.py                         # Selection, dry-run and document orchestration
 ├── persistence/
 │   ├── __init__.py                    # Local persistence package
 │   ├── database.py                    # Async SQLite engine, schema, WAL and FK setup
-│   ├── models.py                      # Four SQLAlchemy storage models
+│   ├── models.py                      # Extraction, retained source and validation audit storage
 │   └── repository.py                  # Short chunk transactions, queries, finalization
 └── llm/prompts/
     └── implementation_observations.jinja2
@@ -217,10 +218,16 @@ long paragraph is complete.
 ## Grounding and limits
 
 Every span's whole quote must be a substring of its required physical page after
-whitespace-only normalization (`" ".join(text.split())`). The page must actually be
+the same conservative spacing normalization on quote and source. In addition to
+collapsing whitespace, spaces around an ASCII hyphen between ASCII letters and spaces
+before `,.;:!?` immediately following an ASCII letter are optional. Every non-whitespace
+character and all other word boundaries remain significant. See
+[offline revalidation and reproduced failures](stage1-revalidation.md).
+The page must actually be
 represented in the supplied chunk; a preceding overlap page exposes only its suffix,
 never the rest of that page. A cross-page passage requires separate spans. There is
-no fuzzy matching, punctuation replacement, dehyphenation, or silent quote repair.
+no fuzzy matching, punctuation replacement, hyphen deletion, word-fragment joining,
+or silent quote repair.
 Stored quotes retain their original wording, whitespace, and span order. One invalid
 span rejects only that observation. Structured warnings identify chunk page ranges,
 1-based observation/span indexes, a stable code, a message, and the action taken.
@@ -273,16 +280,24 @@ the integer `observation_id` primary key uniquely identifies each model-produced
 including duplicate instances and repeated runs. Rejected observations have no
 validated provenance ID. Existing pilot files are not migrated.
 
-[pypdf](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) is a lightweight,
-pure-Python dependency with page-level text extraction. It does not require an OCR
-stack. Documents with no extractable text fail visibly and request inspection for
-OCR needs; individual empty pages emit warnings. This version does not automatically
-OCR, reconstruct complex tables, or infer printed report page numbers.
+[PyMuPDF](https://pymupdf.readthedocs.io/en/latest/app1.html) supplies page-level
+text for new runs and PDF-backed offline revalidation through one shared loader.
+New source snapshots retain the PDF hash, extractor version/options, exact pages,
+and overlap. Historical sources remain preferred; alternative PDF text is confined
+to recorded page/overlap limits. pypdf remains available for reconstructing legacy
+chunk constraints. See [revalidation and deferred evidence limitations](stage1-revalidation.md)
+for the dependency/license constraint and historical reproducibility behavior.
+Documents with no extractable text fail visibly and request inspection for OCR
+needs; empty pages emit warnings. This version does not automatically OCR,
+reconstruct tables, match across pages, or infer printed report page numbers.
 
 ## SQLite schema and lifecycle
 
 `initialize_database(path)` creates parent directories and tables explicitly; there
-are no migrations or manual SQL setup. CLI startup uses
+are no column migrations or manual SQL setup. Two additive tables retain exact
+chunk source text for new runs (`extraction_chunk_sources`) and append offline
+validation audits (`validation_revisions`). Existing extraction rows are unchanged.
+CLI startup uses
 `<root>/data/derived/stage1.sqlite`. The async engine uses aiosqlite, WAL,
 foreign keys, a 30-second busy timeout, and FULL synchronous commits. The session
 factory uses `expire_on_commit=False`. Model calls run concurrently within one

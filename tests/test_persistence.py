@@ -76,7 +76,8 @@ class RepositoryTests(unittest.IsolatedAsyncioTestCase):
         async with self.database.engine.connect() as connection:
             names = await connection.run_sync(lambda sync: inspect(sync).get_table_names())
             self.assertEqual(set(names), {"extraction_runs", "extraction_chunks",
-                                         "implementation_observations", "evidence_spans"})
+                                         "implementation_observations", "evidence_spans",
+                                         "extraction_chunk_sources", "validation_revisions"})
             self.assertEqual(await connection.scalar(text("PRAGMA journal_mode")), "wal")
             self.assertEqual(await connection.scalar(text("PRAGMA foreign_keys")), 1)
             self.assertEqual(await connection.scalar(text("PRAGMA synchronous")), 2)

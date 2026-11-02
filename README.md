@@ -136,3 +136,9 @@ Previous attempts are never overwritten or used to skip a new run.
 
 See [Stage 1 documentation](docs/stage1.md) for the schema, lifecycle, query examples,
 validation rules, and one-document pilot commands.
+
+[Offline revalidation](docs/stage1-revalidation.md) describes the read-only
+`extract-observations revalidate` command, PyMuPDF source metadata, apply-on-copy
+commands, and the saved `KM_PAD_2020` investigation. Its
+[deferred evidence limitations](docs/stage1-revalidation.md#deferred-evidence-location-and-spacing-work)
+cover cross-page quotes, structured table evidence, and two narrow spacing cases.

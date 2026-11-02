@@ -1,4 +1,4 @@
-"""Exact grounding after whitespace normalization; no fuzzy quote repair."""
+"""Page-constrained exact grounding with conservative PDF spacing equivalences."""
 
 import hashlib
 import json
@@ -13,6 +13,28 @@ from .models import (
 
 def normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
+
+
+VALIDATOR_VERSION = "stage1-quotes-v2"
+
+
+def normalize_quote_text(text: str) -> str:
+    """Keep every non-whitespace character and all ordinary word boundaries.
+
+    Reproduced PDF artifacts include ``on -site``, ``home- grown`` and ``paid .``.
+    Only an ASCII alphabetic hyphen's surrounding space and space before punctuation
+    immediately following an ASCII letter are optional. Numeric separators/signs, word
+    fragments (``repo rted``), case, and punctuation remain significant.
+    This representation is never stored as the original quote or source text.
+    """
+    text = normalize_whitespace(text)
+    text = re.sub(r"(?<=[A-Za-z])\s*-\s*(?=[A-Za-z])", "-", text)
+    return re.sub(r"(?<=[A-Za-z])\s+([,.;:!?])", r"\1", text)
+
+
+def quote_matches(quote: str, source: str) -> bool:
+    normalized = normalize_quote_text(quote)
+    return bool(normalized) and normalized in normalize_quote_text(source)
 
 
 def _date_appears_in_quote(value: date, quote: str) -> bool:
@@ -52,12 +74,22 @@ def observation_signature(
 
 def validate_observation(
     item: ModelObservation, chunk: DocumentChunk, *, observation_index: int | None = None,
+    additional_source: DocumentChunk | None = None,
 ) -> ObservationValidationResult:
     """Reject ungrounded claims, clear unsupported optional dates, and retain warnings.
 
     Check all provenance before attempting date repairs. Never mutate the provider
     response, remove evidence, repair a quote, or quotation-validate the summary.
     """
+    if additional_source is not None and (
+        additional_source.document_id != chunk.document_id
+        or [page.page_number for page in additional_source.pages] != [page.page_number for page in chunk.pages]
+        or (additional_source.overlap.page_number if additional_source.overlap else None)
+        != (chunk.overlap.page_number if chunk.overlap else None)
+    ):
+        raise ValueError("Additional source must preserve the original document/page/overlap constraints")
+    source_pages = [*chunk.source_pages, *(additional_source.source_pages if additional_source else [])]
+
     def warning(code: str, message: str, action: str, span_index: int | None = None) -> ValidationWarning:
         return ValidationWarning(code=code, message=message, action=action,
                                  chunk_start_page=chunk.start_page, chunk_end_page=chunk.end_page,
@@ -76,10 +108,10 @@ def validate_observation(
         quote = normalize_whitespace(span.quote)
         if not quote:
             return reject("ungrounded_quote", "Evidence quote must not be empty", index)
-        pages = [page for page in chunk.source_pages if page.page_number == span.page]
+        pages = [page for page in source_pages if page.page_number == span.page]
         if not pages:
             return reject("invalid_evidence_page", f"Page {span.page} is not represented in the chunk", index)
-        if not any(quote in normalize_whitespace(page.text) for page in pages):
+        if not any(quote_matches(span.quote, page.text) for page in pages):
             return reject("ungrounded_quote", f"Quote is not present on page {span.page}", index)
 
     warnings = []

@@ -17,11 +17,10 @@ from .models import (
     ChunkExtractionResult,
     DocumentChunk,
     DocumentEntry,
-    PageText,
     RunReport,
     RunStatus,
 )
-from .pdf import extract_pages
+from .pdf import PDFText, load_pdf
 from .persistence import RunArtifacts, reserve_run, write_observations, write_report
 from .service import ImplementationObservationExtractor, render_prompt
 
@@ -29,21 +28,21 @@ logger = logging.getLogger(__name__)
 
 
 def _load_chunks(root: Path, document: DocumentEntry, max_chars: int,
-                 overlap_chars: int) -> tuple[list[PageText], list[DocumentChunk]]:
+                 overlap_chars: int) -> tuple[PDFText, list[DocumentChunk]]:
     """Extract numbered input pages and require at least one nonempty chunk."""
-    pages = extract_pages(root, document)
-    chunks = chunk_pages(document, pages, max_chars=max_chars, overlap_chars=overlap_chars)
+    source = load_pdf(root, document)
+    chunks = chunk_pages(document, source.pages, max_chars=max_chars, overlap_chars=overlap_chars)
     if not chunks:
         raise ValueError("No nonempty text chunks")
-    return pages, chunks
+    return source, chunks
 
 
 def _inspect_document(root: Path, document: DocumentEntry, max_chars: int, overlap_chars: int) -> None:
     """Render every chunk for inspection without configuring a model or writing artifacts."""
-    pages, chunks = _load_chunks(root, document, max_chars, overlap_chars)
+    source, chunks = _load_chunks(root, document, max_chars, overlap_chars)
     renderer = PromptRenderer()
     print(document.model_dump_json())
-    print(f"PDF pages: {len(pages)}; chunks: {len(chunks)}")
+    print(f"PDF pages: {len(source.pages)}; chunks: {len(chunks)}")
     for index, chunk in enumerate(chunks, start=1):
         prompt = render_prompt(renderer, chunk)
         overlap_size = len(chunk.overlap.text) if chunk.overlap is not None else 0
@@ -217,8 +216,8 @@ async def run_documents(
                     _diagnostic(f"Run {run_id}: cannot reserve optional exports: {error}")
             run_error = None
             try:
-                _, chunks = _load_chunks(root, document, max_chars, overlap_chars)
-                chunk_ids = await repository.create_chunks(run_id, chunks)
+                source, chunks = _load_chunks(root, document, max_chars, overlap_chars)
+                chunk_ids = await repository.create_chunks(run_id, chunks, source_metadata=source.metadata)
                 if extractor is None:
                     from digital_applications_prototype.core.llm_runtime import (
                         configured_llm,
@@ -288,7 +287,15 @@ async def run_documents(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["revalidate"]:
+        from .revalidation import main as revalidate_main
+
+        return revalidate_main(arguments[1:])
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Offline validation of saved observations: extract-observations revalidate --help",
+    )
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--document", help="Exact input document ID, e.g. KM_ISR07_2023")
     selection.add_argument("--country", choices=["mexico", "comoros", "sierra-leone"])

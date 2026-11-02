@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, select, update
@@ -21,7 +22,13 @@ from digital_applications_prototype.extraction.validation import (
     observation_duplicate_indexes,
 )
 
-from .models import EvidenceSpanRow, ExtractionChunk, ExtractionRun, Observation
+from .models import (
+    ChunkSource,
+    EvidenceSpanRow,
+    ExtractionChunk,
+    ExtractionRun,
+    Observation,
+)
 
 
 def utc_now() -> str:
@@ -89,13 +96,24 @@ class ExtractionRepository:
         async with self.sessions.begin() as session:
             await session.execute(update(ExtractionRun).where(ExtractionRun.run_id == run_id).values(model=model))
 
-    async def create_chunks(self, run_id: str, chunks: list[DocumentChunk]) -> list[int]:
+    async def create_chunks(
+        self, run_id: str, chunks: list[DocumentChunk], *, source_metadata: dict[str, Any] | None = None,
+    ) -> list[int]:
         rows = [ExtractionChunk(run_id=run_id, chunk_index=index,
                                 start_page=chunk.start_page, end_page=chunk.end_page)
                 for index, chunk in enumerate(chunks, start=1)]
         async with self.sessions.begin() as session:
             session.add_all(rows)
             await session.flush()
+            session.add_all(
+                [
+                    ChunkSource(
+                        chunk_id=row.chunk_id,
+                        source_json={**chunk.model_dump(mode="json"), "pdf_source": source_metadata},
+                    )
+                    for row, chunk in zip(rows, chunks, strict=True)
+                ]
+            )
             return [row.chunk_id for row in rows]
 
     async def mark_chunk_running(self, chunk_id: int) -> None:
